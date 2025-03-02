@@ -84,6 +84,44 @@ document.getElementById('openMovieLinks').addEventListener('click', function() {
     });
   });
   
+// 提取所有磁力链接（所有页面所有链接）
+document.getElementById('extractAllMagnetLinks').addEventListener('click', () => {
+    chrome.tabs.query({}, (tabs) => {
+      const results = [];
+      const promises = [];
+      const totalTabs = tabs.length;
+  
+      tabs.forEach((tab) => {
+        if (!tab.url.startsWith("chrome://")) { // 排除 chrome:// 页面
+          const promise = new Promise((resolve) => {
+            chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: () => {
+                const links = [...document.querySelectorAll('a[href^="magnet:"]')];
+                return links.map(link => link.href); // 返回所有磁力链接
+              }
+            }, (executeResults) => {
+              if (executeResults && executeResults[0]) {
+                const links = executeResults[0].result;
+                if (links && links.length > 0) {
+                  results.push(...links); // 合并所有链接
+                }
+              }
+              resolve();
+            });
+          });
+          promises.push(promise);
+        }
+      });
+  
+      Promise.all(promises).then(() => {
+        displayResults(results, totalTabs);
+        document.getElementById('copyMagnetLinks').style.display = 'block';
+      });
+    });
+  });
+  
+  // 提取磁力链接（每个标签页第一条）
   document.getElementById('extractMagnetLinks').addEventListener('click', () => {
     chrome.tabs.query({}, (tabs) => {
       const results = [];
@@ -97,7 +135,7 @@ document.getElementById('openMovieLinks').addEventListener('click', function() {
               target: { tabId: tab.id },
               func: () => {
                 const links = [...document.querySelectorAll('a[href^="magnet:"]')];
-                return links.length > 0 ? links[0].href : null;
+                return links.length > 0 ? links[0].href : null; // 只返回第一个链接
               }
             }, (executeResults) => {
               if (executeResults && executeResults[0]) {
@@ -120,7 +158,7 @@ document.getElementById('openMovieLinks').addEventListener('click', function() {
     });
   });
   
-  // 显示磁力链接提取结果
+  // 显示结果的通用函数
   function displayResults(results, totalTabs) {
     const resultContainer = document.getElementById('resultContainer');
     resultContainer.innerHTML = '';
@@ -139,9 +177,9 @@ document.getElementById('openMovieLinks').addEventListener('click', function() {
       resultContainer.textContent += ' 未找到磁力链接。';
     }
   }
-  
+
   // 复制磁力链接
-  document.getElementById('copyMagnetLinks').addEventListener('click', () => {
+document.getElementById('copyMagnetLinks').addEventListener('click', () => {
     const resultContainer = document.getElementById('resultContainer');
     const links = Array.from(resultContainer.querySelectorAll('div')).slice(1);
     const linksText = links.map(link => link.textContent).join('\n');
@@ -151,4 +189,4 @@ document.getElementById('openMovieLinks').addEventListener('click', function() {
       console.error('复制失败: ', err);
       alert('复制失败，请重试');
     });
-  });
+  });s

@@ -58,7 +58,10 @@
   <!-- Magnet Link Extractor 部分 -->
   <div class="section">
     <h2>磁力链接提取器</h2>
-    <button id="extractMagnetLinks">提取磁力链接</button>
+    <input type="text" id="magnetUrl" placeholder="输入要提取链接的URL">
+    <button id="fetchAndOpenLinks">提取并打开链接</button>
+    <button id="extractMagnetLinks">提取磁力链接（每个标签页第一条）</button>
+    <button id="extractAllMagnetLinks">提取所有磁力链接（所有页面所有链接）</button>
     <button id="copyMagnetLinks" style="display: none;">复制磁力链接</button>
     <div id="resultContainer"></div>
   </div>
