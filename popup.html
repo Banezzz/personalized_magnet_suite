@@ -4,40 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>超级链接与标签管理工具</title>
-  <style>
-    body {
-      width: 350px;
-      padding: 10px;
-      font-family: Arial, sans-serif;
-    }
-    .section {
-      margin-bottom: 20px;
-    }
-    h2 {
-      font-size: 16px;
-      margin-bottom: 10px;
-    }
-    input[type="text"], input[type="number"] {
-      width: 100%;
-      margin-top: 5px;
-      margin-bottom: 10px;
-      padding: 5px;
-    }
-    button {
-      width: 100%;
-      padding: 5px;
-      margin-bottom: 5px;
-    }
-    #resultContainer {
-      margin-top: 10px;
-      max-height: 150px;
-      overflow-y: auto;
-      font-size: 12px;
-    }
-  </style>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <h1>超级链接与标签管理工具</h1>
+
+  <div class="theme-toggle">
+    <label for="themeToggle">暗色模式</label>
+    <input type="checkbox" id="themeToggle" />
+  </div>
+
+  <div id="tabCount" style="margin-bottom:10px;font-size:13px;"></div>
 
   <!-- Movie Links Opener 部分 -->
   <div class="section">
@@ -53,6 +30,8 @@
     <h2>标签页刷新器</h2>
     <input type="number" id="refreshInterval" value="1" step="0.1" min="0.1" placeholder="刷新间隔（秒）">
     <button id="startRefreshing">开始刷新</button>
+    <button id="stopRefreshing">停止刷新</button>
+    <div id="refreshProgress" style="font-size:12px;margin-top:4px;"></div>
   </div>
 
   <!-- Magnet Link Extractor 部分 -->
@@ -62,10 +41,13 @@
     <button id="fetchAndOpenLinks">提取并打开链接</button>
     <button id="extractMagnetLinks">提取磁力链接（每个标签页第一条）</button>
     <button id="extractAllMagnetLinks">提取所有磁力链接（所有页面所有链接）</button>
-    <button id="copyMagnetLinks" style="display: none;">复制磁力链接</button>
+    <button id="copyMagnetLinks">复制磁力链接</button>
     <div id="resultContainer"></div>
   </div>
 
-  <script src="popup.js"></script>
+  <!-- Toast 提示框 -->
+  <div id="toast"></div>
+
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
