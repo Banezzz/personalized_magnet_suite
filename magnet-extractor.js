@@ -1,37 +1,9 @@
 import { showToast } from './utils.js';
 
 export function initMagnetExtractor() {
-  const fetchAndOpenBtn = document.getElementById('fetchAndOpenLinks');
   const extractFirstBtn = document.getElementById('extractMagnetLinks');
   const extractAllBtn = document.getElementById('extractAllMagnetLinks');
   const copyBtn = document.getElementById('copyMagnetLinks');
-
-  if (fetchAndOpenBtn) {
-    fetchAndOpenBtn.addEventListener('click', () => {
-      const url = document.getElementById('magnetUrl').value.trim();
-      if (!url) {
-        showToast('请输入有效的 URL 用于链接提取');
-        return;
-      }
-      chrome.tabs.create({ url }, (tab) => {
-        chrome.tabs.onUpdated.addListener(function listener(tabId, changeInfo) {
-          if (tabId === tab.id && changeInfo.status === 'complete') {
-            chrome.scripting.executeScript({
-              target: { tabId },
-              func: () => {
-                const links = [...document.querySelectorAll('body > section > div > div.movie-list.h.cols-4 .item a.box')];
-                return links.map(link => link.href);
-              }
-            }, (executeResults) => {
-              const results = executeResults[0]?.result || [];
-              results.forEach(link => chrome.tabs.create({ url: link }));
-            });
-            chrome.tabs.onUpdated.removeListener(listener);
-          }
-        });
-      });
-    });
-  }
 
   if (extractAllBtn) {
     extractAllBtn.addEventListener('click', () => extractLinks({ firstOnly: false, copyBtn }));

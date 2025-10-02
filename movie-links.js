@@ -4,43 +4,58 @@ export function initMovieLinks() {
   const openBtn = document.getElementById('openMovieLinks');
   if (!openBtn) return;
 
+  // 监听来自 background 的进度消息
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === 'movieProgress') {
+      if (message.message) {
+        updateProgress(message.message);
+      } else if (message.current && message.total) {
+        updateProgress(`进度: ${message.current}/${message.total} 链接已打开`);
+      }
+    } else if (message.action === 'movieComplete') {
+      updateProgress(message.message || '完成！');
+      showToast(message.message || '所有链接已打开');
+    } else if (message.action === 'movieError') {
+      updateProgress('');
+      showToast(message.message || '处理失败');
+    } else if (message.action === 'movieTaskCancelled') {
+      updateProgress('任务已取消');
+      showToast('任务已取消');
+    }
+  });
+
   openBtn.addEventListener('click', () => {
     const urlInput = document.getElementById('movieUrl').value.trim();
     const isTopChecked = document.getElementById('topOption').checked;
+    const batchSize = parseInt(document.getElementById('batchSize').value) || 2;
+    const delaySeconds = parseFloat(document.getElementById('delaySeconds').value) || 3;
 
     if (!urlInput) {
       showToast('请输入有效的电影链接 URL');
       return;
     }
 
-    if (isTopChecked) {
-      const baseUrl = new URL(urlInput);
-      Array.from({ length: 8 }, (_, i) => i + 1).forEach(page => {
-        const pageUrl = new URL(baseUrl);
-        pageUrl.searchParams.set('page', page);
-        fetchAndOpenLinks(pageUrl.toString());
-      });
-    } else {
-      fetchAndOpenLinks(urlInput);
-    }
+    // 发送消息给 background.js 处理
+    chrome.runtime.sendMessage({
+      action: 'openMovieLinks',
+      url: urlInput,
+      isTopMode: isTopChecked,
+      batchSize,
+      delaySeconds
+    }, (response) => {
+      if (response && response.success) {
+        showToast(isTopChecked ? '开始处理多页链接...' : '开始打开链接...');
+        updateProgress('任务已启动，可以关闭此窗口');
+      } else {
+        showToast(response?.message || '任务启动失败');
+      }
+    });
   });
 }
 
-async function fetchAndOpenLinks(url) {
-  try {
-    const response = await fetch(url);
-    const data = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(data, 'text/html');
-    const links = doc.querySelectorAll('.movie-list.h.cols-4 a.box');
-
-    links.forEach(link => {
-      const href = link.getAttribute('href');
-      const fullUrl = `https://javdb.com${href}`;
-      chrome.tabs.create({ url: fullUrl });
-    });
-  } catch (error) {
-    console.error('获取 URL 失败:', error);
-    showToast('获取链接时出错，请检查 URL');
+function updateProgress(message) {
+  const progressEl = document.getElementById('movieProgress');
+  if (progressEl) {
+    progressEl.textContent = message;
   }
 } 
