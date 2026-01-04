@@ -9,6 +9,14 @@ let isRefreshing = false;
 let movieTaskRunning = false;
 let movieTaskCancelled = false;
 
+// 网站选择器预设（与前端保持同步）
+const SITE_PRESETS = {
+  javdb: {
+    selector: '.movie-list.h.cols-4 a.box',
+    baseUrl: 'https://javdb.com'
+  }
+};
+
 // 获取当前所有标签页的 URL
 async function getOpenedTabUrls() {
   return new Promise((resolve) => {
@@ -52,8 +60,8 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, actualDelay));
 }
 
-// 获取页面链接 - 使用临时标签页方式
-async function fetchLinksFromUrl(url) {
+// 获取页面链接 - 使用临时标签页方式（支持自定义选择器）
+async function fetchLinksFromUrl(url, selector, baseUrl) {
   return new Promise((resolve) => {
     // 创建临时标签页
     chrome.tabs.create({ url, active: false }, (tab) => {
@@ -65,16 +73,39 @@ async function fetchLinksFromUrl(url) {
           // 执行脚本提取链接
           chrome.scripting.executeScript({
             target: { tabId },
-            func: () => {
-              const links = [...document.querySelectorAll('.movie-list.h.cols-4 a.box')];
-              return links.map(link => link.getAttribute('href'));
-            }
+            func: (sel) => {
+              const links = [...document.querySelectorAll(sel)];
+              return links.map(link => {
+                const href = link.getAttribute('href');
+                // 返回href，后续在外部处理
+                return href;
+              });
+            },
+            args: [selector]
           }, (results) => {
             chrome.tabs.onUpdated.removeListener(listener);
 
             if (results && results[0] && results[0].result) {
               const hrefs = results[0].result;
-              const fullUrls = hrefs.map(href => `https://javdb.com${href}`);
+              // 处理相对路径
+              const fullUrls = hrefs.map(href => {
+                if (!href) return null;
+                // 如果已经是完整URL
+                if (href.startsWith('http://') || href.startsWith('https://')) {
+                  return href;
+                }
+                // 使用baseUrl拼接
+                if (baseUrl) {
+                  return `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`;
+                }
+                // 尝试从当前URL获取基础路径
+                try {
+                  const urlObj = new URL(url);
+                  return `${urlObj.origin}${href.startsWith('/') ? '' : '/'}${href}`;
+                } catch (e) {
+                  return href;
+                }
+              }).filter(Boolean);
 
               // 关闭临时标签页
               chrome.tabs.remove(tabId, () => {
@@ -95,6 +126,9 @@ async function fetchLinksFromUrl(url) {
       setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(listener);
         chrome.tabs.remove(tabId, () => {
+          if (chrome.runtime.lastError) {
+            // 标签可能已经被关闭
+          }
           resolve([]);
         });
       }, 10000);
@@ -136,8 +170,12 @@ async function handleMovieLinksTask(request) {
   movieTaskRunning = true;
   movieTaskCancelled = false;
 
-  const { url, isTopMode, batchSize, delaySeconds } = request;
+  const { url, isTopMode, batchSize, delaySeconds, selector, baseUrl } = request;
   const delayMs = delaySeconds * 1000;
+
+  // 使用传入的选择器或默认选择器
+  const linkSelector = selector || SITE_PRESETS.javdb.selector;
+  const linkBaseUrl = baseUrl || SITE_PRESETS.javdb.baseUrl;
 
   // 获取当前已打开的标签页 URL
   const openedUrls = await getOpenedTabUrls();
@@ -162,7 +200,7 @@ async function handleMovieLinksTask(request) {
 
         const pageUrl = new URL(url);
         pageUrl.searchParams.set('page', page);
-        const links = await fetchLinksFromUrl(pageUrl.toString());
+        const links = await fetchLinksFromUrl(pageUrl.toString(), linkSelector, linkBaseUrl);
 
         if (links.length > 0) {
           stats.totalLinks += links.length;
@@ -191,7 +229,7 @@ async function handleMovieLinksTask(request) {
       }
     } else {
       // 单页模式
-      const links = await fetchLinksFromUrl(url);
+      const links = await fetchLinksFromUrl(url, linkSelector, linkBaseUrl);
       if (links.length > 0) {
         stats.totalLinks = links.length;
 
@@ -235,7 +273,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     isRefreshing = true;
 
-    chrome.tabs.query({ currentWindow: true }, (tabs) => {
+    // 查询参数：是否排除pinned标签
+    const queryOptions = { currentWindow: true };
+    if (request.excludePinned) {
+      queryOptions.pinned = false;
+    }
+
+    chrome.tabs.query(queryOptions, (tabs) => {
       let index = 0;
       const total = tabs.length;
 
@@ -248,7 +292,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             refreshTimeoutId = setTimeout(refreshNextTab, request.interval);
           });
         } else {
-          safeSendMessage({ action: 'refreshComplete' });
+          safeSendMessage({ action: 'refreshComplete', total });
           // 所有标签刷新完毕，自动停止
           isRefreshing = false;
           refreshTimeoutId = null;
