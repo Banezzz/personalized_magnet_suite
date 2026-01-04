@@ -9,6 +9,32 @@ let isRefreshing = false;
 let movieTaskRunning = false;
 let movieTaskCancelled = false;
 
+// 获取当前所有标签页的 URL
+async function getOpenedTabUrls() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({}, (tabs) => {
+      const urls = new Set(tabs.map(tab => tab.url).filter(Boolean));
+      resolve(urls);
+    });
+  });
+}
+
+// 过滤掉已经打开的链接
+function filterDuplicateLinks(links, openedUrls) {
+  const newLinks = [];
+  const skippedLinks = [];
+
+  for (const link of links) {
+    if (openedUrls.has(link)) {
+      skippedLinks.push(link);
+    } else {
+      newLinks.push(link);
+    }
+  }
+
+  return { newLinks, skippedLinks };
+}
+
 // 安全发送消息，忽略无监听者导致的 lastError
 function safeSendMessage(msg) {
   chrome.runtime.sendMessage(msg, () => {
@@ -77,7 +103,7 @@ async function fetchLinksFromUrl(url) {
 }
 
 // 分批打开链接
-async function openLinksInBatches(urls, batchSize, delayMs, stats) {
+async function openLinksInBatches(urls, batchSize, delayMs, stats, openedUrls) {
   for (let i = 0; i < urls.length; i += batchSize) {
     if (movieTaskCancelled) {
       safeSendMessage({ action: 'movieTaskCancelled' });
@@ -88,6 +114,8 @@ async function openLinksInBatches(urls, batchSize, delayMs, stats) {
     batch.forEach(url => {
       chrome.tabs.create({ url, active: false });
       stats.openedTabs++; // 统计已打开的标签页
+      // 将新打开的链接添加到集合中，防止后续批次重复打开
+      openedUrls.add(url);
     });
 
     const progress = Math.min(i + batchSize, urls.length);
@@ -111,10 +139,14 @@ async function handleMovieLinksTask(request) {
   const { url, isTopMode, batchSize, delaySeconds } = request;
   const delayMs = delaySeconds * 1000;
 
+  // 获取当前已打开的标签页 URL
+  const openedUrls = await getOpenedTabUrls();
+
   // 统计数据
   const stats = {
     totalLinks: 0,
-    openedTabs: 0
+    openedTabs: 0,
+    skippedLinks: 0
   };
 
   try {
@@ -134,7 +166,14 @@ async function handleMovieLinksTask(request) {
 
         if (links.length > 0) {
           stats.totalLinks += links.length;
-          await openLinksInBatches(links, batchSize, delayMs, stats);
+
+          // 过滤已打开的链接
+          const { newLinks, skippedLinks } = filterDuplicateLinks(links, openedUrls);
+          stats.skippedLinks += skippedLinks.length;
+
+          if (newLinks.length > 0) {
+            await openLinksInBatches(newLinks, batchSize, delayMs, stats, openedUrls);
+          }
         }
 
         // 页面间额外延迟
@@ -144,9 +183,10 @@ async function handleMovieLinksTask(request) {
       }
 
       if (!movieTaskCancelled) {
+        const skippedMsg = stats.skippedLinks > 0 ? `，跳过 ${stats.skippedLinks} 个已打开的链接` : '';
         safeSendMessage({
           action: 'movieComplete',
-          message: `✓ 所有页面处理完毕！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页`
+          message: `✓ 所有页面处理完毕！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedMsg}`
         });
       }
     } else {
@@ -154,10 +194,19 @@ async function handleMovieLinksTask(request) {
       const links = await fetchLinksFromUrl(url);
       if (links.length > 0) {
         stats.totalLinks = links.length;
-        await openLinksInBatches(links, batchSize, delayMs, stats);
+
+        // 过滤已打开的链接
+        const { newLinks, skippedLinks } = filterDuplicateLinks(links, openedUrls);
+        stats.skippedLinks = skippedLinks.length;
+
+        if (newLinks.length > 0) {
+          await openLinksInBatches(newLinks, batchSize, delayMs, stats, openedUrls);
+        }
+
+        const skippedMsg = stats.skippedLinks > 0 ? `，跳过 ${stats.skippedLinks} 个已打开的链接` : '';
         safeSendMessage({
           action: 'movieComplete',
-          message: `✓ 完成！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页`
+          message: `✓ 完成！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedMsg}`
         });
       } else {
         safeSendMessage({
