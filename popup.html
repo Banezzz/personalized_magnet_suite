@@ -7,72 +7,100 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <h1>超级链接与标签管理工具</h1>
+  <!-- 头部区域 -->
+  <div class="header">
+    <h1>
+      <span class="icon">🚀</span>
+      超级工具箱
+    </h1>
+    <p class="subtitle">链接管理 · 标签刷新 · 磁力提取</p>
 
-  <div class="theme-toggle">
-    <label for="themeToggle">暗色模式</label>
-    <input type="checkbox" id="themeToggle" />
+    <div class="theme-toggle">
+      <input type="checkbox" id="themeToggle" />
+    </div>
   </div>
 
-  <div id="tabCount" style="margin-bottom:10px;font-size:13px;"></div>
+  <div id="tabCount"></div>
 
   <!-- Movie Links Opener 部分 -->
   <div class="section">
-    <h2>电影链接打开器</h2>
-    <input type="text" id="movieUrl" placeholder="输入电影链接的URL">
+    <h2>
+      <span class="section-icon">🎬</span>
+      电影链接打开器
+    </h2>
+    <input type="text" id="movieUrl" placeholder="🔗 输入电影列表页面的URL...">
     <label>
-      <input type="checkbox" id="topOption"> TOP?
+      <input type="checkbox" id="topOption"> 🔝 TOP模式（添加额外延迟）
     </label>
 
     <!-- 防火墙规避配置 -->
-    <div style="margin-top: 8px; font-size: 12px;">
+    <div class="config-row">
       <label>
-        每批数量: <input type="number" id="batchSize" value="2" min="1" max="10" style="width: 50px;">
+        ⚡ 每批数量
+        <input type="number" id="batchSize" value="2" min="1" max="10">
       </label>
-      <label style="margin-left: 10px;">
-        间隔秒数: <input type="number" id="delaySeconds" value="3" min="1" max="30" step="0.5" style="width: 50px;">
+      <label>
+        ⏱️ 间隔秒数
+        <input type="number" id="delaySeconds" value="3" min="1" max="30" step="0.5">
       </label>
     </div>
 
     <!-- 自定义选择器 -->
     <div class="selector-config">
       <label>
-        网站预设:
+        🌐 网站预设
         <select id="sitePreset">
           <option value="javdb">JavDB</option>
           <option value="javbus">JavBus</option>
           <option value="javlibrary">JavLibrary</option>
           <option value="generic-list">通用列表 (a标签)</option>
-          <option value="custom">自定义</option>
+          <option value="custom">自定义选择器</option>
         </select>
       </label>
-      <input type="text" id="customSelector" placeholder="自定义CSS选择器，如: .item a.link" style="display:none;">
+      <input type="text" id="customSelector" placeholder="✏️ 自定义CSS选择器，如: .item a.link" style="display:none;">
     </div>
 
-    <button id="openMovieLinks">打开电影链接</button>
-    <button id="cancelMovieTask" class="cancel-btn" style="display:none;">取消任务</button>
-    <div id="movieProgress" style="font-size:12px;margin-top:4px;color:#666;"></div>
+    <button id="openMovieLinks">
+      ▶️ 开始打开链接
+    </button>
+    <button id="cancelMovieTask" class="cancel-btn" style="display:none;">
+      ⏹️ 取消任务
+    </button>
+    <div id="movieProgress"></div>
   </div>
+
   <!-- Tab Reloader 部分 -->
   <div class="section">
-    <h2>标签页刷新器</h2>
-    <input type="number" id="refreshInterval" value="1" step="0.1" min="0.1" placeholder="刷新间隔（秒）">
+    <h2>
+      <span class="section-icon">🔄</span>
+      标签页刷新器
+    </h2>
+    <input type="number" id="refreshInterval" value="1" step="0.1" min="0.1" placeholder="🕐 刷新间隔（秒）">
     <label class="checkbox-label">
-      <input type="checkbox" id="excludePinned"> 排除固定标签
+      <input type="checkbox" id="excludePinned"> 📌 排除固定标签页
     </label>
-    <button id="startRefreshing">开始刷新</button>
-    <button id="stopRefreshing">停止刷新</button>
-    <div id="refreshProgress" style="font-size:12px;margin-top:4px;"></div>
+    <div class="button-row">
+      <button id="startRefreshing">▶️ 开始刷新</button>
+      <button id="stopRefreshing" class="secondary-btn">⏹️ 停止</button>
+    </div>
+    <div id="refreshProgress"></div>
   </div>
 
   <!-- Magnet Link Extractor 部分 -->
   <div class="section">
-    <h2>磁力链接提取器</h2>
-    <button id="extractMagnetLinks">提取磁力链接（每个标签页第一条）</button>
-    <button id="extractAllMagnetLinks">提取所有磁力链接（所有页面所有链接）</button>
+    <h2>
+      <span class="section-icon">🧲</span>
+      磁力链接提取器
+    </h2>
+    <button id="extractMagnetLinks">
+      📥 提取磁力链接（每页第一条）
+    </button>
+    <button id="extractAllMagnetLinks">
+      📦 提取所有磁力链接
+    </button>
     <div class="button-row">
-      <button id="copyMagnetLinks">复制磁力链接</button>
-      <button id="exportMagnetLinks">导出为TXT</button>
+      <button id="copyMagnetLinks" class="secondary-btn">📋 复制链接</button>
+      <button id="exportMagnetLinks" class="secondary-btn">💾 导出TXT</button>
     </div>
     <div id="resultContainer"></div>
   </div>
@@ -80,11 +108,14 @@
   <!-- 历史记录 -->
   <div class="section collapsible">
     <h2 class="section-header" id="historyToggle">
-      <span>历史记录</span>
+      <span>
+        <span class="section-icon">📜</span>
+        历史记录
+      </span>
       <span class="toggle-icon">▼</span>
     </h2>
     <div id="historyContent" class="collapsible-content" style="display:none;">
-      <button id="clearHistory" class="secondary-btn">清空历史</button>
+      <button id="clearHistory" class="secondary-btn">🗑️ 清空历史</button>
       <div id="historyList"></div>
     </div>
   </div>
@@ -92,11 +123,14 @@
   <!-- 实时日志 -->
   <div class="section collapsible">
     <h2 class="section-header" id="logToggle">
-      <span>实时日志</span>
+      <span>
+        <span class="section-icon">📋</span>
+        实时日志
+      </span>
       <span class="toggle-icon">▼</span>
     </h2>
     <div id="logContent" class="collapsible-content" style="display:none;">
-      <button id="clearLogs" class="secondary-btn">清空日志</button>
+      <button id="clearLogs" class="secondary-btn">🗑️ 清空日志</button>
       <div id="logContainer"></div>
     </div>
   </div>
@@ -104,7 +138,7 @@
   <!-- 网络状态 -->
   <div id="networkStatus" class="network-status online">
     <span class="status-dot"></span>
-    <span class="status-text">网络正常</span>
+    <span class="status-text">🌐 网络正常</span>
   </div>
 
   <!-- Toast 提示框 -->
