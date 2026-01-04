@@ -511,6 +511,37 @@ body {
   margin-top: 2px;
 }
 
+.history-item .history-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.history-status-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* 历史记录状态样式 */
+.history-item.history-running {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, var(--bg) 100%);
+}
+
+.history-item.history-completed {
+  border-left: 3px solid var(--success);
+}
+
+.history-item.history-failed {
+  border-left: 3px solid #ef4444;
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.05) 0%, var(--bg) 100%);
+}
+
+.history-item.history-cancelled {
+  border-left: 3px solid #f59e0b;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.05) 0%, var(--bg) 100%);
+}
+
 /* 日志容器 */
 #logContainer {
   margin-top: 10px;

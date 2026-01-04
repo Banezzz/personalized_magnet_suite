@@ -45,10 +45,26 @@ export function showTabCount() {
   });
 }
 
-// ==================== 日志功能 ====================
+// ==================== 日志功能（持久化存储） ====================
 
-const MAX_LOGS = 100;
+const MAX_LOGS = 200;
 let logs = [];
+
+// 加载持久化日志
+export function loadLogs() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['persistentLogs'], (data) => {
+      logs = data.persistentLogs || [];
+      updateLogDisplay();
+      resolve(logs);
+    });
+  });
+}
+
+// 保存日志到存储
+function saveLogs() {
+  chrome.storage.local.set({ persistentLogs: logs });
+}
 
 export function addLog(message, level = 'info') {
   const timestamp = new Date().toLocaleTimeString('zh-CN', {
@@ -57,13 +73,21 @@ export function addLog(message, level = 'info') {
     second: '2-digit'
   });
 
-  const logEntry = { timestamp, message, level };
+  const date = new Date().toLocaleDateString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit'
+  });
+
+  const logEntry = { date, timestamp, message, level };
   logs.unshift(logEntry);
 
   // 限制日志数量
   if (logs.length > MAX_LOGS) {
     logs = logs.slice(0, MAX_LOGS);
   }
+
+  // 持久化保存
+  saveLogs();
 
   // 更新UI
   updateLogDisplay();
@@ -75,7 +99,7 @@ function updateLogDisplay() {
 
   container.innerHTML = logs.map(log => `
     <div class="log-entry">
-      <span class="log-time">[${log.timestamp}]</span>
+      <span class="log-time">[${log.date} ${log.timestamp}]</span>
       <span class="log-message log-${log.level}">${log.message}</span>
     </div>
   `).join('');
@@ -83,14 +107,92 @@ function updateLogDisplay() {
 
 export function clearLogs() {
   logs = [];
+  saveLogs();
   updateLogDisplay();
   showToast('日志已清空');
 }
 
-// ==================== 历史记录功能 ====================
+// ==================== 历史记录功能（支持任务状态） ====================
 
 const MAX_HISTORY = 50;
 
+// 任务状态常量
+export const TASK_STATUS = {
+  RUNNING: 'running',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled'
+};
+
+// 生成唯一ID
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+// 创建历史记录（任务启动时调用，返回 ID 供后续更新）
+export function createHistory(entry) {
+  const id = generateId();
+  const timestamp = new Date().toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  const historyEntry = {
+    id,
+    action: entry.action,
+    result: entry.result || '进行中...',
+    status: TASK_STATUS.RUNNING,
+    timestamp,
+    startTime: Date.now()
+  };
+
+  chrome.storage.local.get(['taskHistory'], (data) => {
+    let history = data.taskHistory || [];
+    history.unshift(historyEntry);
+
+    // 限制历史数量
+    if (history.length > MAX_HISTORY) {
+      history = history.slice(0, MAX_HISTORY);
+    }
+
+    chrome.storage.local.set({ taskHistory: history }, () => {
+      updateHistoryDisplay();
+    });
+  });
+
+  return id;
+}
+
+// 更新历史记录（任务完成/失败时调用）
+export function updateHistory(id, updates) {
+  chrome.storage.local.get(['taskHistory'], (data) => {
+    let history = data.taskHistory || [];
+    const index = history.findIndex(item => item.id === id);
+
+    if (index !== -1) {
+      history[index] = {
+        ...history[index],
+        ...updates,
+        endTime: Date.now()
+      };
+
+      // 计算耗时
+      if (history[index].startTime) {
+        const duration = Math.round((history[index].endTime - history[index].startTime) / 1000);
+        history[index].duration = duration;
+      }
+
+      chrome.storage.local.set({ taskHistory: history }, () => {
+        updateHistoryDisplay();
+      });
+    }
+  });
+}
+
+// 保留旧的 saveHistory 接口以兼容简单场景
 export function saveHistory(entry) {
   const timestamp = new Date().toLocaleString('zh-CN', {
     month: '2-digit',
@@ -100,7 +202,9 @@ export function saveHistory(entry) {
   });
 
   const historyEntry = {
+    id: generateId(),
     ...entry,
+    status: TASK_STATUS.COMPLETED,
     timestamp
   };
 
@@ -133,6 +237,22 @@ function updateHistoryDisplay() {
   });
 }
 
+// 状态图标和颜色映射
+function getStatusDisplay(status) {
+  switch (status) {
+    case TASK_STATUS.RUNNING:
+      return { icon: '⏳', color: 'var(--accent)', text: '进行中' };
+    case TASK_STATUS.COMPLETED:
+      return { icon: '✓', color: 'var(--success)', text: '已完成' };
+    case TASK_STATUS.FAILED:
+      return { icon: '✗', color: '#ef4444', text: '失败' };
+    case TASK_STATUS.CANCELLED:
+      return { icon: '⊘', color: '#f59e0b', text: '已取消' };
+    default:
+      return { icon: '✓', color: 'var(--success)', text: '已完成' };
+  }
+}
+
 function displayHistory(history) {
   const container = document.getElementById('historyList');
   if (!container) return;
@@ -142,15 +262,21 @@ function displayHistory(history) {
     return;
   }
 
-  container.innerHTML = history.map(item => `
-    <div class="history-item">
+  container.innerHTML = history.map(item => {
+    const statusDisplay = getStatusDisplay(item.status);
+    const durationText = item.duration ? ` (${item.duration}秒)` : '';
+    return `
+    <div class="history-item history-${item.status || 'completed'}">
       <div class="history-info">
-        <div class="history-action">${item.action}</div>
-        <div class="history-result">${item.result}</div>
+        <div class="history-action">
+          <span class="history-status-icon" style="color: ${statusDisplay.color}">${statusDisplay.icon}</span>
+          ${item.action}
+        </div>
+        <div class="history-result">${item.result}${durationText}</div>
       </div>
       <div class="history-time">${item.timestamp}</div>
     </div>
-  `).join('');
+  `}).join('');
 }
 
 export function clearHistory() {
