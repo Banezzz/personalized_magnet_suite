@@ -6,16 +6,20 @@ import {
   showTabCount,
   initCollapsibles,
   initNetworkStatus,
-  addLog
+  addLog,
+  loadLogs
 } from './utils.js';
 
 // 入口
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // 初始化主题
   initThemeToggle();
 
   // 显示标签计数
   showTabCount();
+
+  // 加载持久化日志（先加载再记录启动日志）
+  await loadLogs();
 
   // 初始化各功能模块
   initMovieLinks();

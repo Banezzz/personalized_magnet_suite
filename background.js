@@ -9,6 +9,16 @@ let isRefreshing = false;
 let movieTaskRunning = false;
 let movieTaskCancelled = false;
 
+// 保存任务进度到存储（持久化）
+function saveTaskProgress(progress) {
+  chrome.storage.local.set({ movieTaskProgress: progress });
+}
+
+// 清除任务进度
+function clearTaskProgress() {
+  chrome.storage.local.remove('movieTaskProgress');
+}
+
 // 网站选择器预设（与前端保持同步）
 const SITE_PRESETS = {
   javdb: {
@@ -140,6 +150,7 @@ async function fetchLinksFromUrl(url, selector, baseUrl) {
 async function openLinksInBatches(urls, batchSize, delayMs, stats, openedUrls) {
   for (let i = 0; i < urls.length; i += batchSize) {
     if (movieTaskCancelled) {
+      clearTaskProgress();
       safeSendMessage({ action: 'movieTaskCancelled' });
       return;
     }
@@ -153,8 +164,17 @@ async function openLinksInBatches(urls, batchSize, delayMs, stats, openedUrls) {
     });
 
     const progress = Math.min(i + batchSize, urls.length);
+    const batchProgressMsg = `进度: ${progress}/${urls.length} 链接已打开`;
     safeSendMessage({
       action: 'movieProgress',
+      current: progress,
+      total: urls.length,
+      message: batchProgressMsg
+    });
+    // 持久化保存批次进度
+    saveTaskProgress({
+      running: true,
+      message: batchProgressMsg,
       current: progress,
       total: urls.length
     });
@@ -172,6 +192,15 @@ async function handleMovieLinksTask(request) {
 
   const { url, isTopMode, batchSize, delaySeconds, selector, baseUrl } = request;
   const delayMs = delaySeconds * 1000;
+
+  // 保存初始任务状态
+  saveTaskProgress({
+    running: true,
+    url: url,
+    isTopMode: isTopMode,
+    message: '任务已启动，可以关闭此窗口',
+    startTime: Date.now()
+  });
 
   // 使用传入的选择器或默认选择器
   const linkSelector = selector || SITE_PRESETS.javdb.selector;
@@ -193,9 +222,20 @@ async function handleMovieLinksTask(request) {
       for (let page = 1; page <= 8; page++) {
         if (movieTaskCancelled) break;
 
+        const progressMsg = `正在处理第 ${page}/8 页...`;
         safeSendMessage({
           action: 'movieProgress',
-          message: `正在处理第 ${page}/8 页...`
+          message: progressMsg
+        });
+        // 持久化保存进度
+        saveTaskProgress({
+          running: true,
+          url: url,
+          isTopMode: true,
+          message: progressMsg,
+          currentPage: page,
+          totalPages: 8,
+          stats: { ...stats }
         });
 
         const pageUrl = new URL(url);
@@ -262,6 +302,8 @@ async function handleMovieLinksTask(request) {
   } finally {
     movieTaskRunning = false;
     movieTaskCancelled = false;
+    // 任务结束，清除进度
+    clearTaskProgress();
   }
 }
 
@@ -319,5 +361,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'cancelMovieTask') {
     movieTaskCancelled = true;
     sendResponse({ success: true });
+  } else if (request.action === 'getMovieTaskStatus') {
+    // 返回当前任务状态
+    sendResponse({ running: movieTaskRunning });
+    return true;
   }
 });

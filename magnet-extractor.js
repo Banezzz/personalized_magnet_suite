@@ -1,4 +1,7 @@
-import { showToast, addLog, saveHistory } from './utils.js';
+import { showToast, addLog, saveHistory, createHistory, updateHistory, TASK_STATUS } from './utils.js';
+
+// 当前任务的历史记录 ID
+let currentExtractHistoryId = null;
 
 export function initMagnetExtractor() {
   const extractFirstBtn = document.getElementById('extractMagnetLinks');
@@ -113,6 +116,12 @@ function deduplicateAndValidate(links) {
 function extractLinks({ firstOnly, copyBtn, exportBtn }) {
   addLog(`开始提取磁力链接 (${firstOnly ? '每页第一条' : '全部'})`, 'info');
 
+  // 创建历史记录（任务启动时立即显示）
+  currentExtractHistoryId = createHistory({
+    action: '磁力链接提取',
+    result: `正在提取 (${firstOnly ? '每页第一条' : '全部'})...`
+  });
+
   chrome.tabs.query({ currentWindow: true }, (tabs) => {
     const results = [];
     const promises = [];
@@ -155,12 +164,17 @@ function extractLinks({ firstOnly, copyBtn, exportBtn }) {
         exportBtn.style.display = 'block';
       }
 
-      // 记录日志和历史
+      // 记录日志
       addLog(`提取完成: ${validLinks.length} 条有效链接`, 'success');
-      saveHistory({
-        action: '磁力链接提取',
-        result: `${validLinks.length} 条有效，${duplicateCount} 条重复，${invalidCount} 条无效`
-      });
+
+      // 更新历史记录为完成状态
+      if (currentExtractHistoryId) {
+        updateHistory(currentExtractHistoryId, {
+          status: TASK_STATUS.COMPLETED,
+          result: `${validLinks.length} 条有效，${duplicateCount} 条重复，${invalidCount} 条无效`
+        });
+        currentExtractHistoryId = null;
+      }
     });
   });
 }

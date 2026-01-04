@@ -1,4 +1,7 @@
-import { showToast, addLog, saveHistory } from './utils.js';
+import { showToast, addLog, createHistory, updateHistory, TASK_STATUS } from './utils.js';
+
+// 当前任务的历史记录 ID
+let currentRefreshHistoryId = null;
 
 export function initTabReloader() {
   const startBtn = document.getElementById('startRefreshing');
@@ -14,6 +17,12 @@ export function initTabReloader() {
       }
 
       const excludePinned = excludePinnedCheckbox ? excludePinnedCheckbox.checked : false;
+
+      // 创建历史记录（任务启动时立即显示）
+      currentRefreshHistoryId = createHistory({
+        action: '标签页刷新',
+        result: `正在刷新，间隔 ${interval / 1000} 秒${excludePinned ? '（排除固定标签）' : ''}`
+      });
 
       chrome.runtime.sendMessage({
         action: 'startRefreshing',
@@ -31,6 +40,14 @@ export function initTabReloader() {
       chrome.runtime.sendMessage({ action: 'stopRefreshing' });
       showToast('标签页刷新已停止');
       addLog('停止刷新标签页', 'warning');
+      // 更新历史记录为取消状态
+      if (currentRefreshHistoryId) {
+        updateHistory(currentRefreshHistoryId, {
+          status: TASK_STATUS.CANCELLED,
+          result: '用户手动停止'
+        });
+        currentRefreshHistoryId = null;
+      }
     });
   }
 
@@ -46,10 +63,14 @@ export function initTabReloader() {
       if (progressEl) progressEl.textContent = '刷新完成';
       showToast('所有标签刷新完毕');
       addLog('所有标签刷新完毕', 'success');
-      saveHistory({
-        action: '标签页刷新',
-        result: `刷新了 ${message.total || '全部'} 个标签页`
-      });
+      // 更新历史记录为完成状态
+      if (currentRefreshHistoryId) {
+        updateHistory(currentRefreshHistoryId, {
+          status: TASK_STATUS.COMPLETED,
+          result: `刷新了 ${message.total || '全部'} 个标签页`
+        });
+        currentRefreshHistoryId = null;
+      }
     }
   });
 }

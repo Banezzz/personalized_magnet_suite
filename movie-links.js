@@ -1,4 +1,4 @@
-import { showToast, addLog, saveHistory } from './utils.js';
+import { showToast, addLog, createHistory, updateHistory, TASK_STATUS } from './utils.js';
 
 // 网站选择器预设
 const SITE_PRESETS = {
@@ -24,6 +24,9 @@ const SITE_PRESETS = {
   }
 };
 
+// 当前任务的历史记录 ID
+let currentTaskHistoryId = null;
+
 export function initMovieLinks() {
   const openBtn = document.getElementById('openMovieLinks');
   const cancelBtn = document.getElementById('cancelMovieTask');
@@ -31,6 +34,9 @@ export function initMovieLinks() {
   const customSelector = document.getElementById('customSelector');
 
   if (!openBtn) return;
+
+  // 恢复持久化的任务进度（popup 重新打开时）
+  restoreTaskProgress(cancelBtn);
 
   // 选择器预设切换
   if (sitePreset) {
@@ -73,21 +79,40 @@ export function initMovieLinks() {
       addLog(message.message || '任务完成', 'success');
       // 隐藏取消按钮
       if (cancelBtn) cancelBtn.style.display = 'none';
-      // 保存历史记录
-      saveHistory({
-        action: '电影链接打开',
-        result: message.message || '完成'
-      });
+      // 更新历史记录为完成状态
+      if (currentTaskHistoryId) {
+        updateHistory(currentTaskHistoryId, {
+          status: TASK_STATUS.COMPLETED,
+          result: message.message || '完成'
+        });
+        currentTaskHistoryId = null;
+      }
     } else if (message.action === 'movieError') {
       updateProgress('');
       showToast(message.message || '处理失败');
       addLog(message.message || '处理失败', 'error');
       if (cancelBtn) cancelBtn.style.display = 'none';
+      // 更新历史记录为失败状态
+      if (currentTaskHistoryId) {
+        updateHistory(currentTaskHistoryId, {
+          status: TASK_STATUS.FAILED,
+          result: message.message || '处理失败'
+        });
+        currentTaskHistoryId = null;
+      }
     } else if (message.action === 'movieTaskCancelled') {
       updateProgress('任务已取消');
       showToast('任务已取消');
       addLog('任务已取消', 'warning');
       if (cancelBtn) cancelBtn.style.display = 'none';
+      // 更新历史记录为取消状态
+      if (currentTaskHistoryId) {
+        updateHistory(currentTaskHistoryId, {
+          status: TASK_STATUS.CANCELLED,
+          result: '用户取消任务'
+        });
+        currentTaskHistoryId = null;
+      }
     }
   });
 
@@ -121,6 +146,12 @@ export function initMovieLinks() {
 
     addLog(`开始任务: ${urlInput}`, 'info');
 
+    // 创建历史记录（任务启动时立即显示）
+    currentTaskHistoryId = createHistory({
+      action: '电影链接打开',
+      result: `正在处理: ${urlInput.substring(0, 50)}${urlInput.length > 50 ? '...' : ''}`
+    });
+
     // 发送消息给 background.js 处理
     chrome.runtime.sendMessage({
       action: 'openMovieLinks',
@@ -138,6 +169,14 @@ export function initMovieLinks() {
       } else {
         showToast(response?.message || '任务启动失败');
         addLog(response?.message || '任务启动失败', 'error');
+        // 任务启动失败，更新历史记录
+        if (currentTaskHistoryId) {
+          updateHistory(currentTaskHistoryId, {
+            status: TASK_STATUS.FAILED,
+            result: response?.message || '任务启动失败'
+          });
+          currentTaskHistoryId = null;
+        }
       }
     });
   });
@@ -148,4 +187,24 @@ function updateProgress(message) {
   if (progressEl) {
     progressEl.textContent = message;
   }
+}
+
+// 恢复持久化的任务进度
+function restoreTaskProgress(cancelBtn) {
+  // 先检查 background 是否有正在运行的任务
+  chrome.runtime.sendMessage({ action: 'getMovieTaskStatus' }, (response) => {
+    if (response && response.running) {
+      // 有任务正在运行，从存储中读取进度
+      chrome.storage.local.get(['movieTaskProgress'], (data) => {
+        const progress = data.movieTaskProgress;
+        if (progress && progress.running) {
+          // 恢复显示进度
+          updateProgress(progress.message || '任务进行中...');
+          // 显示取消按钮
+          if (cancelBtn) cancelBtn.style.display = 'block';
+          addLog('检测到正在运行的任务，已恢复显示进度', 'info');
+        }
+      });
+    }
+  });
 }
