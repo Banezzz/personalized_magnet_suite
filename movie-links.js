@@ -65,21 +65,20 @@ export function initMovieLinks() {
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === 'movieProgress') {
       if (message.message) {
-        updateProgress(message.message);
+        updateProgress(message.message, message.current, message.total);
         addLog(message.message, 'info');
       } else if (message.current && message.total) {
         const progressMsg = `进度: ${message.current}/${message.total} 链接已打开`;
-        updateProgress(progressMsg);
+        updateProgress(progressMsg, message.current, message.total);
       }
-      // 显示取消按钮
       if (cancelBtn) cancelBtn.style.display = 'block';
     } else if (message.action === 'movieComplete') {
-      updateProgress(message.message || '完成！');
+      updateProgress(message.message || '完成！', 1, 1);
       showToast(message.message || '所有链接已打开');
       addLog(message.message || '任务完成', 'success');
-      // 隐藏取消按钮
       if (cancelBtn) cancelBtn.style.display = 'none';
-      // 更新历史记录为完成状态
+      openBtn.disabled = false;
+      setTimeout(() => updateProgress(''), 2000);
       if (currentTaskHistoryId) {
         updateHistory(currentTaskHistoryId, {
           status: TASK_STATUS.COMPLETED,
@@ -92,7 +91,7 @@ export function initMovieLinks() {
       showToast(message.message || '处理失败');
       addLog(message.message || '处理失败', 'error');
       if (cancelBtn) cancelBtn.style.display = 'none';
-      // 更新历史记录为失败状态
+      openBtn.disabled = false;
       if (currentTaskHistoryId) {
         updateHistory(currentTaskHistoryId, {
           status: TASK_STATUS.FAILED,
@@ -101,11 +100,11 @@ export function initMovieLinks() {
         currentTaskHistoryId = null;
       }
     } else if (message.action === 'movieTaskCancelled') {
-      updateProgress('任务已取消');
+      updateProgress('');
       showToast('任务已取消');
       addLog('任务已取消', 'warning');
       if (cancelBtn) cancelBtn.style.display = 'none';
-      // 更新历史记录为取消状态
+      openBtn.disabled = false;
       if (currentTaskHistoryId) {
         updateHistory(currentTaskHistoryId, {
           status: TASK_STATUS.CANCELLED,
@@ -166,6 +165,7 @@ export function initMovieLinks() {
         showToast(isTopChecked ? '开始处理多页链接...' : '开始打开链接...');
         updateProgress('任务已启动，可以关闭此窗口');
         if (cancelBtn) cancelBtn.style.display = 'block';
+        openBtn.disabled = true;
       } else {
         showToast(response?.message || '任务启动失败');
         addLog(response?.message || '任务启动失败', 'error');
@@ -182,10 +182,32 @@ export function initMovieLinks() {
   });
 }
 
-function updateProgress(message) {
+function updateProgress(message, current, total) {
   const progressEl = document.getElementById('movieProgress');
   if (progressEl) {
     progressEl.textContent = message;
+  }
+
+  const barWrap = document.getElementById('movieProgressBar');
+  if (!barWrap) return;
+  const barFill = barWrap.querySelector('.progress-bar-fill');
+
+  if (!message) {
+    // 清除进度条
+    barWrap.style.display = 'none';
+    barFill.style.width = '0%';
+    barFill.classList.remove('indeterminate');
+    return;
+  }
+
+  barWrap.style.display = 'block';
+  if (current && total) {
+    barFill.classList.remove('indeterminate');
+    barFill.style.width = `${Math.round((current / total) * 100)}%`;
+  } else {
+    // 不确定进度时显示动画
+    barFill.classList.add('indeterminate');
+    barFill.style.width = '';
   }
 }
 

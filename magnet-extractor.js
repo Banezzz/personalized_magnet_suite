@@ -114,9 +114,15 @@ function deduplicateAndValidate(links) {
 }
 
 function extractLinks({ firstOnly, copyBtn, exportBtn }) {
+  const extractFirstBtn = document.getElementById('extractMagnetLinks');
+  const extractAllBtn = document.getElementById('extractAllMagnetLinks');
+
+  // 禁用按钮防止重复点击
+  if (extractFirstBtn) extractFirstBtn.disabled = true;
+  if (extractAllBtn) extractAllBtn.disabled = true;
+
   addLog(`开始提取磁力链接 (${firstOnly ? '每页第一条' : '全部'})`, 'info');
 
-  // 创建历史记录（任务启动时立即显示）
   currentExtractHistoryId = createHistory({
     action: '磁力链接提取',
     result: `正在提取 (${firstOnly ? '每页第一条' : '全部'})...`
@@ -154,20 +160,20 @@ function extractLinks({ firstOnly, copyBtn, exportBtn }) {
     });
 
     Promise.all(promises).then(() => {
-      // 去重和验证
+      // 恢复按钮状态
+      if (extractFirstBtn) extractFirstBtn.disabled = false;
+      if (extractAllBtn) extractAllBtn.disabled = false;
+
       const { validLinks, invalidCount, duplicateCount } = deduplicateAndValidate(results);
       displayResults(validLinks, tabs.length, results.length, invalidCount, duplicateCount);
 
-      // 显示复制和导出按钮
       if (validLinks.length > 0) {
         copyBtn.style.display = 'block';
         exportBtn.style.display = 'block';
       }
 
-      // 记录日志
       addLog(`提取完成: ${validLinks.length} 条有效链接`, 'success');
 
-      // 更新历史记录为完成状态
       if (currentExtractHistoryId) {
         updateHistory(currentExtractHistoryId, {
           status: TASK_STATUS.COMPLETED,
@@ -198,17 +204,28 @@ function displayResults(validLinks, totalTabs, rawCount, invalidCount, duplicate
   if (validLinks.length > 0) {
     const linkList = document.createElement('div');
     linkList.className = 'link-list';
+
+    // 使用 DocumentFragment 批量创建DOM
+    const fragment = document.createDocumentFragment();
     validLinks.forEach((link, index) => {
       const div = document.createElement('div');
       div.className = 'magnet-link';
       div.textContent = link;
       div.title = `${index + 1}. 点击复制`;
-      div.addEventListener('click', () => {
-        navigator.clipboard.writeText(link).then(() => {
-          showToast('链接已复制');
-        });
+      fragment.appendChild(div);
+    });
+    linkList.appendChild(fragment);
+
+    // 事件委托：单个监听器处理所有链接点击
+    linkList.addEventListener('click', (e) => {
+      const magnetDiv = e.target.closest('.magnet-link');
+      if (!magnetDiv) return;
+      navigator.clipboard.writeText(magnetDiv.textContent).then(() => {
+        showToast('链接已复制');
+        // 视觉反馈：短暂高亮已复制的链接
+        magnetDiv.classList.add('copied');
+        setTimeout(() => magnetDiv.classList.remove('copied'), 600);
       });
-      linkList.appendChild(div);
     });
     container.appendChild(linkList);
   } else {

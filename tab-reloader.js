@@ -58,12 +58,26 @@ export function initTabReloader() {
       if (progressEl) {
         progressEl.textContent = `刷新进度: ${message.current} / ${message.total}`;
       }
+      // 更新进度条
+      const barWrap = document.getElementById('refreshProgressBar');
+      if (barWrap) {
+        barWrap.style.display = 'block';
+        const fill = barWrap.querySelector('.progress-bar-fill');
+        fill.classList.remove('indeterminate');
+        fill.style.width = `${Math.round((message.current / message.total) * 100)}%`;
+      }
     } else if (message.action === 'refreshComplete') {
       const progressEl = document.getElementById('refreshProgress');
       if (progressEl) progressEl.textContent = '刷新完成';
+      // 完成进度条
+      const barWrap = document.getElementById('refreshProgressBar');
+      if (barWrap) {
+        const fill = barWrap.querySelector('.progress-bar-fill');
+        fill.style.width = '100%';
+        setTimeout(() => { barWrap.style.display = 'none'; fill.style.width = '0%'; }, 2000);
+      }
       showToast('所有标签刷新完毕');
       addLog('所有标签刷新完毕', 'success');
-      // 更新历史记录为完成状态
       if (currentRefreshHistoryId) {
         updateHistory(currentRefreshHistoryId, {
           status: TASK_STATUS.COMPLETED,

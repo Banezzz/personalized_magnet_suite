@@ -17,7 +17,7 @@
 :root.dark {
   --bg: #0a0a0a;
   --text: #fafafa;
-  --text-secondary: #9ca3af;
+  --text-secondary: #b0b8c4;
   --card-bg: #18181b;
   --border: #27272a;
   --primary: #fafafa;
@@ -223,6 +223,19 @@ button:active {
   box-shadow: var(--shadow-sm);
 }
 
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+button:disabled:hover {
+  transform: none;
+  box-shadow: none;
+  background: var(--primary);
+}
+
 button:last-of-type {
   margin-bottom: 0;
 }
@@ -330,6 +343,34 @@ button:last-of-type {
   justify-content: center;
 }
 
+/* 进度条 */
+.progress-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.4s ease;
+}
+
+.progress-bar-fill.indeterminate {
+  width: 30%;
+  animation: indeterminate 1.5s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
 /* 配置区域样式 */
 .section > div[style*="margin-top"] {
   display: flex;
@@ -355,6 +396,25 @@ button:last-of-type {
   padding: 4px 8px;
   font-size: 12px;
   text-align: center;
+}
+
+/* 键盘焦点样式 */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.collapsible .section-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.magnet-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* 响应式和流畅过渡 */
@@ -468,9 +528,20 @@ body {
 }
 
 .collapsible-content {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 1px solid var(--border);
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.25s ease, margin-top 0.3s ease, padding-top 0.3s ease;
+}
+
+.collapsible.expanded .collapsible-content {
+  max-height: 500px;
+  opacity: 1;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid var(--border);
 }
 
 /* 历史记录列表 */
@@ -664,4 +735,9 @@ body {
 
 .magnet-link:last-child {
   margin-bottom: 0;
+}
+
+.magnet-link.copied {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: var(--success);
 } 
