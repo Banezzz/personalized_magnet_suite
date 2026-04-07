@@ -49,6 +49,7 @@ export function showTabCount() {
 
 const MAX_LOGS = 200;
 let logs = [];
+let saveLogsTimer = null;
 
 // 加载持久化日志
 export function loadLogs() {
@@ -61,9 +62,13 @@ export function loadLogs() {
   });
 }
 
-// 保存日志到存储
+// 保存日志到存储（防抖，500ms内合并多次写入）
 function saveLogs() {
-  chrome.storage.local.set({ persistentLogs: logs });
+  if (saveLogsTimer) clearTimeout(saveLogsTimer);
+  saveLogsTimer = setTimeout(() => {
+    chrome.storage.local.set({ persistentLogs: logs });
+    saveLogsTimer = null;
+  }, 500);
 }
 
 export function addLog(message, level = 'info') {
@@ -86,23 +91,45 @@ export function addLog(message, level = 'info') {
     logs = logs.slice(0, MAX_LOGS);
   }
 
-  // 持久化保存
+  // 持久化保存（防抖）
   saveLogs();
 
-  // 更新UI
-  updateLogDisplay();
+  // 增量更新UI（只插入新条目，不重建整个列表）
+  const container = document.getElementById('logContainer');
+  if (!container) return;
+  const entryEl = createLogEntryElement(logEntry);
+  container.insertBefore(entryEl, container.firstChild);
+
+  // 移除超出最大数量的旧条目
+  while (container.children.length > MAX_LOGS) {
+    container.removeChild(container.lastChild);
+  }
+}
+
+function createLogEntryElement(log) {
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  const time = document.createElement('span');
+  time.className = 'log-time';
+  time.textContent = `[${log.date} ${log.timestamp}]`;
+  const msg = document.createElement('span');
+  msg.className = `log-message log-${log.level}`;
+  msg.textContent = log.message;
+  div.appendChild(time);
+  div.appendChild(msg);
+  return div;
 }
 
 function updateLogDisplay() {
   const container = document.getElementById('logContainer');
   if (!container) return;
 
-  container.innerHTML = logs.map(log => `
-    <div class="log-entry">
-      <span class="log-time">[${log.date} ${log.timestamp}]</span>
-      <span class="log-message log-${log.level}">${log.message}</span>
-    </div>
-  `).join('');
+  const fragment = document.createDocumentFragment();
+  for (const log of logs) {
+    fragment.appendChild(createLogEntryElement(log));
+  }
+  container.innerHTML = '';
+  container.appendChild(fragment);
 }
 
 export function clearLogs() {
@@ -153,13 +180,13 @@ export function createHistory(entry) {
     let history = data.taskHistory || [];
     history.unshift(historyEntry);
 
-    // 限制历史数量
     if (history.length > MAX_HISTORY) {
       history = history.slice(0, MAX_HISTORY);
     }
 
     chrome.storage.local.set({ taskHistory: history }, () => {
-      updateHistoryDisplay();
+      // 直接传递已有数据，避免重复读取 storage
+      displayHistory(history);
     });
   });
 
@@ -179,14 +206,13 @@ export function updateHistory(id, updates) {
         endTime: Date.now()
       };
 
-      // 计算耗时
       if (history[index].startTime) {
         const duration = Math.round((history[index].endTime - history[index].startTime) / 1000);
         history[index].duration = duration;
       }
 
       chrome.storage.local.set({ taskHistory: history }, () => {
-        updateHistoryDisplay();
+        displayHistory(history);
       });
     }
   });
@@ -212,25 +238,17 @@ export function saveHistory(entry) {
     let history = data.taskHistory || [];
     history.unshift(historyEntry);
 
-    // 限制历史数量
     if (history.length > MAX_HISTORY) {
       history = history.slice(0, MAX_HISTORY);
     }
 
     chrome.storage.local.set({ taskHistory: history }, () => {
-      updateHistoryDisplay();
+      displayHistory(history);
     });
   });
 }
 
 export function loadHistory() {
-  chrome.storage.local.get(['taskHistory'], (data) => {
-    const history = data.taskHistory || [];
-    displayHistory(history);
-  });
-}
-
-function updateHistoryDisplay() {
   chrome.storage.local.get(['taskHistory'], (data) => {
     const history = data.taskHistory || [];
     displayHistory(history);
@@ -257,26 +275,52 @@ function displayHistory(history) {
   const container = document.getElementById('historyList');
   if (!container) return;
 
+  container.innerHTML = '';
+
   if (history.length === 0) {
-    container.innerHTML = '<div style="color: var(--text-secondary); font-size: 11px;">暂无历史记录</div>';
+    const empty = document.createElement('div');
+    empty.style.cssText = 'color: var(--text-secondary); font-size: 11px;';
+    empty.textContent = '暂无历史记录';
+    container.appendChild(empty);
     return;
   }
 
-  container.innerHTML = history.map(item => {
+  const fragment = document.createDocumentFragment();
+  for (const item of history) {
     const statusDisplay = getStatusDisplay(item.status);
     const durationText = item.duration ? ` (${item.duration}秒)` : '';
-    return `
-    <div class="history-item history-${item.status || 'completed'}">
-      <div class="history-info">
-        <div class="history-action">
-          <span class="history-status-icon" style="color: ${statusDisplay.color}">${statusDisplay.icon}</span>
-          ${item.action}
-        </div>
-        <div class="history-result">${item.result}${durationText}</div>
-      </div>
-      <div class="history-time">${item.timestamp}</div>
-    </div>
-  `}).join('');
+
+    const div = document.createElement('div');
+    div.className = `history-item history-${item.status || 'completed'}`;
+
+    const info = document.createElement('div');
+    info.className = 'history-info';
+
+    const action = document.createElement('div');
+    action.className = 'history-action';
+    const icon = document.createElement('span');
+    icon.className = 'history-status-icon';
+    icon.style.color = statusDisplay.color;
+    icon.textContent = statusDisplay.icon;
+    action.appendChild(icon);
+    action.append(` ${item.action}`);
+
+    const result = document.createElement('div');
+    result.className = 'history-result';
+    result.textContent = `${item.result}${durationText}`;
+
+    info.appendChild(action);
+    info.appendChild(result);
+
+    const time = document.createElement('div');
+    time.className = 'history-time';
+    time.textContent = item.timestamp;
+
+    div.appendChild(info);
+    div.appendChild(time);
+    fragment.appendChild(div);
+  }
+  container.appendChild(fragment);
 }
 
 export function clearHistory() {
@@ -289,38 +333,40 @@ export function clearHistory() {
 // ==================== 可折叠区域 ====================
 
 export function initCollapsibles() {
-  // 历史记录折叠
-  const historyToggle = document.getElementById('historyToggle');
-  const historyContent = document.getElementById('historyContent');
-  if (historyToggle && historyContent) {
-    historyToggle.addEventListener('click', () => {
-      const section = historyToggle.closest('.collapsible');
+  // 通用折叠切换处理
+  function setupToggle(toggleEl, onExpand) {
+    if (!toggleEl) return;
+    const handler = () => {
+      const section = toggleEl.closest('.collapsible');
       const isExpanded = section.classList.toggle('expanded');
-      historyContent.style.display = isExpanded ? 'block' : 'none';
-      if (isExpanded) loadHistory();
+      toggleEl.setAttribute('aria-expanded', isExpanded);
+      if (isExpanded && onExpand) onExpand();
+    };
+    toggleEl.addEventListener('click', handler);
+    toggleEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handler();
+      }
     });
   }
 
-  // 日志折叠
-  const logToggle = document.getElementById('logToggle');
-  const logContent = document.getElementById('logContent');
-  if (logToggle && logContent) {
-    logToggle.addEventListener('click', () => {
-      const section = logToggle.closest('.collapsible');
-      const isExpanded = section.classList.toggle('expanded');
-      logContent.style.display = isExpanded ? 'block' : 'none';
-    });
-  }
+  setupToggle(document.getElementById('historyToggle'), loadHistory);
+  setupToggle(document.getElementById('logToggle'));
 
-  // 清空按钮
+  // 清空按钮（带确认）
   const clearHistoryBtn = document.getElementById('clearHistory');
   if (clearHistoryBtn) {
-    clearHistoryBtn.addEventListener('click', clearHistory);
+    clearHistoryBtn.addEventListener('click', () => {
+      if (confirm('确定要清空所有历史记录吗？')) clearHistory();
+    });
   }
 
   const clearLogsBtn = document.getElementById('clearLogs');
   if (clearLogsBtn) {
-    clearLogsBtn.addEventListener('click', clearLogs);
+    clearLogsBtn.addEventListener('click', () => {
+      if (confirm('确定要清空所有日志吗？')) clearLogs();
+    });
   }
 }
 

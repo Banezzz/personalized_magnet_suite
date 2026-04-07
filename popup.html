@@ -52,6 +52,9 @@
     <button id="openMovieLinks">打开电影链接</button>
     <button id="cancelMovieTask" class="cancel-btn" style="display:none;">取消任务</button>
     <div id="movieProgress" style="font-size:12px;margin-top:4px;color:#666;"></div>
+    <div class="progress-bar-wrap" id="movieProgressBar" style="display:none;">
+      <div class="progress-bar-fill"></div>
+    </div>
   </div>
   <!-- Tab Reloader 部分 -->
   <div class="section">
@@ -63,6 +66,9 @@
     <button id="startRefreshing">开始刷新</button>
     <button id="stopRefreshing">停止刷新</button>
     <div id="refreshProgress" style="font-size:12px;margin-top:4px;"></div>
+    <div class="progress-bar-wrap" id="refreshProgressBar" style="display:none;">
+      <div class="progress-bar-fill"></div>
+    </div>
   </div>
 
   <!-- Magnet Link Extractor 部分 -->
@@ -79,11 +85,11 @@
 
   <!-- 历史记录 -->
   <div class="section collapsible">
-    <h2 class="section-header" id="historyToggle">
+    <h2 class="section-header" id="historyToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="historyContent">
       <span>历史记录</span>
-      <span class="toggle-icon">▼</span>
+      <span class="toggle-icon" aria-hidden="true">▼</span>
     </h2>
-    <div id="historyContent" class="collapsible-content" style="display:none;">
+    <div id="historyContent" class="collapsible-content">
       <button id="clearHistory" class="secondary-btn">清空历史</button>
       <div id="historyList"></div>
     </div>
@@ -91,11 +97,11 @@
 
   <!-- 实时日志 -->
   <div class="section collapsible">
-    <h2 class="section-header" id="logToggle">
+    <h2 class="section-header" id="logToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="logContent">
       <span>实时日志</span>
-      <span class="toggle-icon">▼</span>
+      <span class="toggle-icon" aria-hidden="true">▼</span>
     </h2>
-    <div id="logContent" class="collapsible-content" style="display:none;">
+    <div id="logContent" class="collapsible-content">
       <button id="clearLogs" class="secondary-btn">清空日志</button>
       <div id="logContainer"></div>
     </div>
@@ -108,7 +114,7 @@
   </div>
 
   <!-- Toast 提示框 -->
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
 
   <script type="module" src="popup.js"></script>
 </body>
