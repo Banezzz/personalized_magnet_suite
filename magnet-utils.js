@@ -2,7 +2,12 @@
  * Magnet-link validation, size parsing, and deduplication. No Chrome APIs.
  */
 
-import { SUBTITLE_MAGNET_PHRASES, SUBTITLE_MAGNET_TAGS } from './constants.js';
+import {
+  SUBTITLE_MAGNET_PHRASES,
+  SUBTITLE_MAGNET_TAGS,
+  UNCENSORED_MAGNET_PHRASES,
+  UNCENSORED_MAGNET_TAGS
+} from './constants.js';
 
 export const MAGNET_PREFIX_RE = /^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i;
 export const BTIH_RE = /btih:([a-zA-Z0-9]{32,40})/i;
@@ -79,44 +84,54 @@ export function hasChineseSubtitleLabel(text) {
   return false;
 }
 
-function selectLargestMagnet(candidates) {
-  let best = candidates[0];
-  let bestSize = parseSizeToBytes(best.sizeText);
-  for (let i = 1; i < candidates.length; i++) {
-    const size = parseSizeToBytes(candidates[i].sizeText);
-    if (size > bestSize) {
-      best = candidates[i];
-      bestSize = size;
+export function hasUncensoredLabel(text) {
+  const source = String(text || '');
+  if (!source) return false;
+  const lower = source.toLowerCase();
+  for (const phrase of UNCENSORED_MAGNET_PHRASES) {
+    if (lower.includes(phrase.toLowerCase())) return true;
+  }
+  for (const tag of UNCENSORED_MAGNET_TAGS) {
+    if (hasStandaloneTag(source, tag)) return true;
+  }
+  return false;
+}
+
+export function magnetPriorityScore(item, { preferSubtitles = false, preferUncensored = false } = {}) {
+  const label = candidateLabelText(item);
+  let score = 0;
+  if (preferSubtitles && hasChineseSubtitleLabel(label)) score += 1;
+  if (preferUncensored && hasUncensoredLabel(label)) score += 1;
+  return score;
+}
+
+export function selectPreferredMagnet(candidates, options = {}) {
+  const valid = (candidates || []).filter((item) => item && isValidMagnetLink(item.href));
+  if (valid.length === 0) return null;
+
+  let best = valid[0];
+  let bestScore = magnetPriorityScore(best, options);
+  for (let i = 1; i < valid.length; i++) {
+    const score = magnetPriorityScore(valid[i], options);
+    if (score > bestScore) {
+      best = valid[i];
+      bestScore = score;
     }
   }
   return best.href;
 }
 
-export function selectPreferredMagnet(candidates, { preferSubtitles = false } = {}) {
-  const valid = (candidates || []).filter((item) => item && isValidMagnetLink(item.href));
-  if (valid.length === 0) return null;
-
-  if (preferSubtitles) {
-    const withSubs = valid.filter((item) => hasChineseSubtitleLabel(candidateLabelText(item)));
-    if (withSubs.length > 0) return withSubs[0].href;
-  }
-  return selectLargestMagnet(valid);
-}
-
-export function flattenMagnetCandidates(candidates, { firstOnly = false, preferSubtitles = false } = {}) {
+export function flattenMagnetCandidates(candidates, { firstOnly = false, ...options } = {}) {
   if (!candidates || candidates.length === 0) return [];
   const valid = candidates.filter((item) => item && isValidMagnetLink(item.href));
   if (valid.length === 0) return [];
   if (firstOnly) {
-    const preferred = selectPreferredMagnet(valid, { preferSubtitles });
+    const preferred = selectPreferredMagnet(valid, options);
     return preferred ? [preferred] : [];
   }
-  if (!preferSubtitles) {
-    return valid.map((item) => item.href);
-  }
-  const withSubs = valid.filter((item) => hasChineseSubtitleLabel(candidateLabelText(item)));
-  const others = valid.filter((item) => !hasChineseSubtitleLabel(candidateLabelText(item)));
-  return [...withSubs, ...others].map((item) => item.href);
+  return [...valid]
+    .sort((left, right) => magnetPriorityScore(right, options) - magnetPriorityScore(left, options))
+    .map((item) => item.href);
 }
 
 export function deduplicateAndValidate(links) {

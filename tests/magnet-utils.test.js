@@ -6,7 +6,9 @@ import {
   extractBtih,
   flattenMagnetCandidates,
   hasChineseSubtitleLabel,
+  hasUncensoredLabel,
   isValidMagnetLink,
+  magnetPriorityScore,
   parseSizeToBytes,
   selectPreferredMagnet
 } from '../magnet-utils.js';
@@ -15,10 +17,12 @@ const HASH_A = 'a'.repeat(40);
 const HASH_B = 'b'.repeat(40);
 const HASH_C = 'c'.repeat(40);
 const HASH_D = 'd'.repeat(40);
+const HASH_E = 'e'.repeat(40);
 const MAGNET_A = `magnet:?xt=urn:btih:${HASH_A}`;
 const MAGNET_B = `magnet:?xt=urn:btih:${HASH_B}&dn=title`;
 const MAGNET_UC = `magnet:?xt=urn:btih:${HASH_C}&dn=SSIS-001-UC`;
 const MAGNET_C = `magnet:?xt=urn:btih:${HASH_D}&dn=SSIS-001-C`;
+const MAGNET_U = `magnet:?xt=urn:btih:${HASH_E}&dn=SSIS-001-U`;
 
 describe('isValidMagnetLink', () => {
   it('accepts standard btih magnets', () => {
@@ -68,72 +72,123 @@ describe('hasChineseSubtitleLabel', () => {
   });
 });
 
+describe('hasUncensoredLabel', () => {
+  it('matches U, UC, 无码, and uncensored', () => {
+    assert.equal(hasUncensoredLabel('PRED-123-U 2.1GB'), true);
+    assert.equal(hasUncensoredLabel('SSIS-001-UC'), true);
+    assert.equal(hasUncensoredLabel('无码破解 4.2GB'), true);
+    assert.equal(hasUncensoredLabel('Uncensored leak'), true);
+    assert.equal(hasUncensoredLabel('中文字幕 700MB'), false);
+    assert.equal(hasUncensoredLabel('UHD extras'), false);
+  });
+});
+
 describe('decodeMagnetName', () => {
   it('reads the dn query parameter', () => {
     assert.equal(decodeMagnetName(MAGNET_UC), 'SSIS-001-UC');
   });
 });
 
+describe('magnetPriorityScore', () => {
+  const both = { preferSubtitles: true, preferUncensored: true };
+  const none = { href: MAGNET_A, sizeText: '普通 8GB' };
+  const subtitle = { href: MAGNET_C, sizeText: 'C 700MB' };
+  const uncensored = { href: MAGNET_U, sizeText: 'U 无码' };
+  const bothLabels = { href: MAGNET_UC, sizeText: 'UC 无码破解 中文字幕' };
+
+  it('adds one point per enabled matching preference', () => {
+    assert.equal(magnetPriorityScore(none, both), 0);
+    assert.equal(magnetPriorityScore(subtitle, both), 1);
+    assert.equal(magnetPriorityScore(uncensored, both), 1);
+    assert.equal(magnetPriorityScore(bothLabels, both), 2);
+  });
+
+  it('ignores a dimension when that preference is off', () => {
+    assert.equal(magnetPriorityScore(uncensored, { preferSubtitles: true, preferUncensored: false }), 0);
+    assert.equal(magnetPriorityScore(subtitle, { preferSubtitles: false, preferUncensored: true }), 0);
+    assert.equal(magnetPriorityScore(bothLabels, { preferSubtitles: false, preferUncensored: false }), 0);
+  });
+});
+
 describe('selectPreferredMagnet', () => {
-  it('uses the largest size when subtitle preference is off', () => {
+  const mixed = [
+    { href: MAGNET_A, sizeText: '普通 8GB' },
+    { href: MAGNET_C, sizeText: 'C 700MB' },
+    { href: MAGNET_U, sizeText: 'U 无码' },
+    { href: MAGNET_UC, sizeText: 'UC 1GB' }
+  ];
+
+  it('keeps page order when both preferences are off', () => {
+    assert.equal(
+      selectPreferredMagnet(mixed, { preferSubtitles: false, preferUncensored: false }),
+      MAGNET_A
+    );
+  });
+
+  it('prefers a subtitle magnet when only preferSubtitles is on', () => {
+    assert.equal(
+      selectPreferredMagnet(mixed, { preferSubtitles: true, preferUncensored: false }),
+      MAGNET_C
+    );
+  });
+
+  it('prefers an uncensored magnet when only preferUncensored is on', () => {
+    assert.equal(
+      selectPreferredMagnet(mixed, { preferSubtitles: false, preferUncensored: true }),
+      MAGNET_U
+    );
+  });
+
+  it('scores UC highest when both preferences are on', () => {
+    assert.equal(
+      selectPreferredMagnet(mixed, { preferSubtitles: true, preferUncensored: true }),
+      MAGNET_UC
+    );
+  });
+
+  it('falls back to the first listed magnet when nothing matches', () => {
     const preferred = selectPreferredMagnet([
-      { href: MAGNET_C, sizeText: 'C 700MB' },
-      { href: MAGNET_A, sizeText: '4.2GB HD' }
-    ], { preferSubtitles: false });
+      { href: MAGNET_A, sizeText: '普通 700MB' },
+      { href: MAGNET_B, sizeText: '普通 4.2GB' }
+    ], { preferSubtitles: true, preferUncensored: true });
     assert.equal(preferred, MAGNET_A);
-  });
-
-  it('prefers the first subtitle magnet when the option is on', () => {
-    const preferred = selectPreferredMagnet([
-      { href: MAGNET_A, sizeText: '无码破解 8GB' },
-      { href: MAGNET_C, sizeText: 'C 700MB' },
-      { href: MAGNET_UC, sizeText: 'UC 1GB' }
-    ], { preferSubtitles: true });
-    assert.equal(preferred, MAGNET_C);
-  });
-
-  it('skips U-only magnets when preferring subtitles', () => {
-    const preferred = selectPreferredMagnet([
-      { href: MAGNET_A, sizeText: 'U 6GB' },
-      { href: MAGNET_UC, sizeText: 'UC 1GB' }
-    ], { preferSubtitles: true });
-    assert.equal(preferred, MAGNET_UC);
-  });
-
-  it('falls back to the largest size when no subtitle label matches', () => {
-    const preferred = selectPreferredMagnet([
-      { href: MAGNET_A, sizeText: '无码破解 700MB' },
-      { href: MAGNET_B, sizeText: 'U 4.2GB' }
-    ], { preferSubtitles: true });
-    assert.equal(preferred, MAGNET_B);
   });
 });
 
 describe('flattenMagnetCandidates', () => {
-  it('returns only the preferred magnet in first-only mode', () => {
+  it('returns the first listed magnet in first-only mode when both preferences are off', () => {
     const result = flattenMagnetCandidates([
       { href: MAGNET_A, sizeText: '1GB' },
       { href: MAGNET_B, sizeText: '8GB' }
-    ], { firstOnly: true, preferSubtitles: false });
-    assert.deepEqual(result, [MAGNET_B]);
+    ], { firstOnly: true, preferSubtitles: false, preferUncensored: false });
+    assert.deepEqual(result, [MAGNET_A]);
   });
 
-  it('keeps page order when subtitle preference is off', () => {
+  it('still returns one magnet when no priority label matches', () => {
+    const result = flattenMagnetCandidates([
+      { href: MAGNET_A, sizeText: '普通 1GB' },
+      { href: MAGNET_B, sizeText: '普通 8GB' }
+    ], { firstOnly: true, preferSubtitles: true, preferUncensored: true });
+    assert.deepEqual(result, [MAGNET_A]);
+  });
+
+  it('keeps page order when both preferences are off', () => {
     const result = flattenMagnetCandidates([
       { href: MAGNET_A, sizeText: '8GB' },
       { href: MAGNET_UC, sizeText: 'UC 1GB' },
       { href: MAGNET_B, sizeText: '2GB' }
-    ], { firstOnly: false, preferSubtitles: false });
+    ], { firstOnly: false, preferSubtitles: false, preferUncensored: false });
     assert.deepEqual(result, [MAGNET_A, MAGNET_UC, MAGNET_B]);
   });
 
-  it('lists subtitle magnets first when the option is on', () => {
+  it('sorts extract-all by combined score then page order', () => {
     const result = flattenMagnetCandidates([
-      { href: MAGNET_A, sizeText: '无码破解 8GB' },
-      { href: MAGNET_UC, sizeText: 'UC 1GB' },
-      { href: MAGNET_B, sizeText: '2GB' }
-    ], { firstOnly: false, preferSubtitles: true });
-    assert.deepEqual(result, [MAGNET_UC, MAGNET_A, MAGNET_B]);
+      { href: MAGNET_A, sizeText: '普通 8GB' },
+      { href: MAGNET_C, sizeText: 'C 700MB' },
+      { href: MAGNET_U, sizeText: 'U 无码' },
+      { href: MAGNET_UC, sizeText: 'UC 1GB' }
+    ], { firstOnly: false, preferSubtitles: true, preferUncensored: true });
+    assert.deepEqual(result, [MAGNET_UC, MAGNET_C, MAGNET_U, MAGNET_A]);
   });
 });
 

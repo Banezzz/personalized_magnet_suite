@@ -79,13 +79,13 @@ Single source: `SITE_PRESETS` in `constants.js`.
 
 - Format: `/^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i`
 - Dedup by lowercase btih
-- Optional “prefer subtitles” checkbox: first magnet tagged C, UC, 中文字幕, or 中英字幕/文件. U and 无码破解 mean uncensored without subtitles and are skipped. Off = largest listed size
+- Independent priorities: **优先字幕** and **优先无码** can be combined. Score 0–2 per magnet (subtitle +1, uncensored +1). First-only picks the highest score, then page order; if nothing matches, take the first magnet on the page. Extract-all sorts by score and keeps every link.
 - Also reads `data-clipboard-text`
 
 ## Storage
 
 - `chrome.storage.sync`: `isDarkTheme`
-- `chrome.storage.local`: `taskHistory` (50), `persistentLogs` (200), `movieTaskProgress`, `refreshTaskProgress`, `movieSettings`
+- `chrome.storage.local`: `taskHistory` (50), `persistentLogs` (200), `movieTaskProgress`, `refreshTaskProgress`, `movieSettings`, `magnetSettings` (`preferSubtitles`, `preferUncensored`)
 
 ## Permissions
 

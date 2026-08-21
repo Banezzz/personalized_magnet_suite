@@ -79,3 +79,9 @@ export const SUBTITLE_MAGNET_PHRASES = ['中文字幕', '中英字幕', '中英�
 
 /** Tags that mean Chinese subtitles: C = Chinese, UC = uncensored + Chinese. */
 export const SUBTITLE_MAGNET_TAGS = ['UC', 'C'];
+
+/** Phrases that mean the magnet is uncensored. */
+export const UNCENSORED_MAGNET_PHRASES = ['无码破解', '无码', 'uncensored'];
+
+/** Tags that mean uncensored: U = uncensored, UC = uncensored + Chinese. */
+export const UNCENSORED_MAGNET_TAGS = ['UC', 'U'];
