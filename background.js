@@ -505,7 +505,11 @@ async function handleMovieLinksTask(request, { resumed = false } = {}) {
     }
 
     if (hrefs.length === 0) {
-      await finalizeMovieTask('complete', describeExtractionFailure(diagnostic), movieHistoryId);
+      const reason = describeExtractionFailure(diagnostic);
+      const kind = diagnostic?.blocked || diagnostic?.login || diagnostic?.error
+        ? 'error'
+        : 'complete';
+      await finalizeMovieTask(kind, reason, movieHistoryId);
       return;
     }
 
