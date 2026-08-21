@@ -89,7 +89,7 @@ Single source: `SITE_PRESETS` in `constants.js`.
 
 ## Permissions
 
-- Always: `tabs`, `tabGroups`, `scripting`, `storage`, `alarms`, `*://*.javdb.com/*`
+- Always: `tabs`, `tabGroups`, `scripting`, `storage`, `alarms`, `*://javdb.com/*`, `*://*.javdb.com/*`
 - Optional: `http(s)://*/*` requested when the user opens a non-JavDB origin or extracts from other tabs
 
 ## Adding a Feature Module
