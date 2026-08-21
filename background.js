@@ -14,6 +14,7 @@ import { delay, randomBetween, sleep } from './delay-utils.js';
 import { createHistoryEntry, TASK_STATUS, updateHistoryEntry } from './history-store.js';
 import {
   describeExtractionFailure,
+  describeMoviePreview,
   filterDuplicateLinks,
   isHttpUrl,
   normalizeUrl,
@@ -278,6 +279,8 @@ async function openLinksInBatches(urls, batchSize, delayMs, stats, openedUrls, o
       message
     });
     await persistFn({
+      phase: 'opening',
+      pendingUrls: urls.slice(i + batchSize),
       message,
       current: progress,
       total: urls.length,
@@ -293,6 +296,80 @@ async function openLinksInBatches(urls, batchSize, delayMs, stats, openedUrls, o
 
 function skippedSuffix(stats) {
   return stats.skippedLinks > 0 ? `，跳过 ${stats.skippedLinks} 个已打开的链接` : '';
+}
+
+async function presentPreviewOrFinish({ pendingUrls, stats, persist, historyId, emptyKind, emptyMessage }) {
+  if (!pendingUrls.length) {
+    await finalizeMovieTask(emptyKind || 'complete', emptyMessage || describeMoviePreview(0, stats.skippedLinks), historyId);
+    return { previewing: false };
+  }
+
+  const message = describeMoviePreview(pendingUrls.length, stats.skippedLinks);
+  await persist({
+    phase: 'preview',
+    pendingUrls,
+    message,
+    current: 0,
+    total: pendingUrls.length
+  });
+  await updateHistoryEntry(historyId, {
+    result: `${message}，等待确认`
+  });
+  safeSendMessage({
+    action: ACTIONS.moviePreview,
+    message,
+    newCount: pendingUrls.length,
+    skippedCount: stats.skippedLinks,
+    totalLinks: stats.totalLinks
+  });
+  return { previewing: true };
+}
+
+async function openPendingAndFinish({
+  pendingUrls,
+  batchSize,
+  delayMs,
+  stats,
+  openedUrls,
+  openInGroup,
+  persist,
+  historyId
+}) {
+  if (!pendingUrls.length) {
+    await finalizeMovieTask('complete', describeMoviePreview(0, stats.skippedLinks), historyId);
+    return;
+  }
+
+  await persist({
+    phase: 'opening',
+    pendingUrls,
+    message: '开始打开...',
+    current: 0,
+    total: pendingUrls.length
+  });
+  safeSendMessage({
+    action: ACTIONS.movieProgress,
+    message: '开始打开...',
+    current: 0,
+    total: pendingUrls.length
+  });
+
+  const result = await openLinksInBatches(
+    pendingUrls,
+    batchSize,
+    delayMs,
+    stats,
+    openedUrls,
+    openInGroup,
+    persist
+  );
+  if (result.cancelled || movieTaskCancelled) {
+    await finalizeMovieTask('cancelled', '', historyId);
+    return;
+  }
+
+  const message = `✓ 完成！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedSuffix(stats)}`;
+  await finalizeMovieTask('complete', message, historyId);
 }
 
 async function finalizeMovieTask(kind, message, historyId) {
@@ -325,6 +402,73 @@ async function finalizeMovieTask(kind, message, historyId) {
     result: message
   });
   safeSendMessage({ action: ACTIONS.movieComplete, message });
+}
+
+async function handleConfirmMovieOpen() {
+  const data = await storageGet([STORAGE_KEYS.movieTaskProgress]);
+  const progress = data[STORAGE_KEYS.movieTaskProgress];
+  if (!progress?.pendingUrls?.length || progress.phase !== 'preview') {
+    return { success: false, message: '没有待打开的链接' };
+  }
+
+  movieTaskCancelled = false;
+  if (!movieTaskRunning) {
+    movieTaskRunning = true;
+    startKeepAlive();
+  }
+  movieHistoryId = progress.historyId || progress.config?.historyId || movieHistoryId;
+  movieGroupId = progress.groupId ?? null;
+
+  const config = progress.config || {};
+  const delayMs = (config.delaySeconds || DEFAULTS.delaySeconds) * 1000;
+  const openedUrls = await getOpenedTabUrls();
+  if (Array.isArray(progress.openedUrls)) {
+    for (const opened of progress.openedUrls) {
+      openedUrls.add(normalizeUrl(opened));
+    }
+  }
+  const stats = progress.stats || {
+    totalLinks: 0,
+    openedTabs: 0,
+    skippedLinks: 0,
+    failedTabs: 0
+  };
+
+  const persist = async (extra = {}) => {
+    await persistMovieProgress({
+      running: true,
+      type: 'movie',
+      url: config.url,
+      isTopMode: config.isTopMode,
+      historyId: movieHistoryId,
+      config,
+      openedUrls: [...openedUrls],
+      groupId: movieGroupId,
+      startTime: progress.startTime || Date.now(),
+      stats: { ...stats },
+      phase: 'opening',
+      pendingUrls: extra.pendingUrls ?? progress.pendingUrls,
+      ...extra
+    });
+  };
+
+  try {
+    await openPendingAndFinish({
+      pendingUrls: progress.pendingUrls,
+      batchSize: config.batchSize || DEFAULTS.batchSize,
+      delayMs,
+      stats,
+      openedUrls,
+      openInGroup: config.openInGroup !== false,
+      persist,
+      historyId: movieHistoryId
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('Confirm movie open failed:', error);
+    await finalizeMovieTask('error', '处理失败，请检查 URL', movieHistoryId);
+    return { success: false, message: '处理失败' };
+  }
 }
 
 async function handleMovieLinksTask(request, { resumed = false } = {}) {
@@ -407,7 +551,39 @@ async function handleMovieLinksTask(request, { resumed = false } = {}) {
     });
   };
 
-  await persist({ message: resumed ? '任务已恢复' : '任务已启动，可以关闭此窗口' });
+  const pendingUrls = Array.isArray(request.resumeState?.pendingUrls)
+    ? [...request.resumeState.pendingUrls]
+    : [];
+
+  await persist({
+    phase: request.resumeState?.phase || 'collecting',
+    pendingUrls,
+    message: resumed ? '任务已恢复' : '正在解析链接，稍后确认打开数量'
+  });
+
+  if (resumed && request.resumeState?.phase === 'preview') {
+    await presentPreviewOrFinish({
+      pendingUrls,
+      stats,
+      persist,
+      historyId: movieHistoryId
+    });
+    return;
+  }
+
+  if (resumed && request.resumeState?.phase === 'opening') {
+    await openPendingAndFinish({
+      pendingUrls,
+      batchSize,
+      delayMs,
+      stats,
+      openedUrls,
+      openInGroup,
+      persist,
+      historyId: movieHistoryId
+    });
+    return;
+  }
 
   try {
     if (isTopMode) {
@@ -464,23 +640,18 @@ async function handleMovieLinksTask(request, { resumed = false } = {}) {
         } else {
           consecutiveEmpty = 0;
           stats.totalLinks += hrefs.length;
+          const alreadyQueued = new Set(pendingUrls.map((link) => normalizeUrl(link)));
           const { newLinks, skippedLinks } = filterDuplicateLinks(hrefs, openedUrls);
           stats.skippedLinks += skippedLinks.length;
-          if (newLinks.length > 0) {
-            const result = await openLinksInBatches(
-              newLinks,
-              batchSize,
-              delayMs,
-              stats,
-              openedUrls,
-              openInGroup,
-              persist
-            );
-            if (result.cancelled || movieTaskCancelled) {
-              await finalizeMovieTask('cancelled', '', movieHistoryId);
-              return;
-            }
-          }
+          pendingUrls.push(...newLinks.filter((link) => !alreadyQueued.has(normalizeUrl(link))));
+          await persist({
+            phase: 'collecting',
+            pendingUrls: [...pendingUrls],
+            message: `第 ${page} 页：找到 ${newLinks.length} 个新链接`,
+            currentPage: page,
+            totalPages: pageCount,
+            consecutiveEmpty
+          });
         }
 
         if (page < pageCount && !movieTaskCancelled) {
@@ -493,8 +664,12 @@ async function handleMovieLinksTask(request, { resumed = false } = {}) {
         return;
       }
 
-      const message = `✓ 所有页面处理完毕！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedSuffix(stats)}`;
-      await finalizeMovieTask('complete', message, movieHistoryId);
+      await presentPreviewOrFinish({
+        pendingUrls,
+        stats,
+        persist,
+        historyId: movieHistoryId
+      });
       return;
     }
 
@@ -514,26 +689,16 @@ async function handleMovieLinksTask(request, { resumed = false } = {}) {
     }
 
     stats.totalLinks = hrefs.length;
+    const alreadyQueued = new Set(pendingUrls.map((link) => normalizeUrl(link)));
     const { newLinks, skippedLinks } = filterDuplicateLinks(hrefs, openedUrls);
     stats.skippedLinks = skippedLinks.length;
-    if (newLinks.length > 0) {
-      const result = await openLinksInBatches(
-        newLinks,
-        batchSize,
-        delayMs,
-        stats,
-        openedUrls,
-        openInGroup,
-        persist
-      );
-      if (result.cancelled || movieTaskCancelled) {
-        await finalizeMovieTask('cancelled', '', movieHistoryId);
-        return;
-      }
-    }
-
-    const message = `✓ 完成！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedSuffix(stats)}`;
-    await finalizeMovieTask('complete', message, movieHistoryId);
+    pendingUrls.push(...newLinks.filter((link) => !alreadyQueued.has(normalizeUrl(link))));
+    await presentPreviewOrFinish({
+      pendingUrls,
+      stats,
+      persist,
+      historyId: movieHistoryId
+    });
   } catch (error) {
     console.error('Movie link task failed:', error);
     await finalizeMovieTask('error', '处理失败，请检查 URL', movieHistoryId);
@@ -684,9 +849,20 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === ACTIONS.confirmMovieOpen) {
+    handleConfirmMovieOpen().then((result) => sendResponse(result || { success: true }));
+    return true;
+  }
+
   if (request.action === ACTIONS.cancelMovieTask) {
     movieTaskCancelled = true;
-    sendResponse({ success: true });
+    storageGet([STORAGE_KEYS.movieTaskProgress]).then(async (data) => {
+      const progress = data[STORAGE_KEYS.movieTaskProgress];
+      if (progress?.phase === 'preview') {
+        await finalizeMovieTask('cancelled', '', progress.historyId || movieHistoryId);
+      }
+      sendResponse({ success: true });
+    });
     return true;
   }
 
