@@ -46,7 +46,8 @@ export const STORAGE_KEYS = {
   taskHistory: 'taskHistory',
   persistentLogs: 'persistentLogs',
   isDarkTheme: 'isDarkTheme',
-  movieSettings: 'movieSettings'
+  movieSettings: 'movieSettings',
+  magnetSettings: 'magnetSettings'
 };
 
 export const LIMITS = {
@@ -72,3 +73,9 @@ export const DEFAULTS = {
 export const ALARM_KEEP_ALIVE = 'taskKeepAlive';
 
 export const JAVDB_STRIP_QUERY_PARAMS = ['lang', 'f', 'locale', 'utm_source', 'utm_medium', 'utm_campaign'];
+
+/** Phrases that mean the magnet has Chinese (or Chinese-English) subtitles. */
+export const SUBTITLE_MAGNET_PHRASES = ['中文字幕', '中英字幕', '中英文件'];
+
+/** Tags that mean Chinese subtitles: C = Chinese, UC = uncensored + Chinese. */
+export const SUBTITLE_MAGNET_TAGS = ['UC', 'C'];
