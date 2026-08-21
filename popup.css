@@ -29,7 +29,23 @@
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
 }
 
-/* 全局样式 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.is-hidden {
+  display: none;
+}
+
+/* Global reset */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -47,7 +63,7 @@ body {
   transition: background 0.2s ease;
 }
 
-/* 顶部标题区域 */
+/* Header */
 h1 {
   font-size: 16px;
   font-weight: 600;
@@ -56,7 +72,7 @@ h1 {
   letter-spacing: -0.01em;
 }
 
-/* 主题切换 */
+/* Theme toggle */
 .theme-toggle {
   display: flex;
   align-items: center;
@@ -111,7 +127,7 @@ h1 {
   background: #fafafa;
 }
 
-/* 标签计数 */
+/* Tab count */
 #tabCount {
   padding: 0 20px 16px 20px;
   font-size: 12px;
@@ -119,7 +135,59 @@ h1 {
   font-weight: 500;
 }
 
-/* 卡片区域 */
+.url-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.url-row input[type="text"] {
+  flex: 1;
+  margin-bottom: 10px;
+}
+
+.compact-btn {
+  width: auto;
+  flex-shrink: 0;
+  padding: 10px 10px !important;
+  margin-bottom: 10px;
+  font-size: 11px !important;
+}
+
+.config-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--bg);
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid var(--border);
+}
+
+.config-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.config-row input[type="number"] {
+  width: 56px;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.empty-result {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Cards */
 .section {
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -143,7 +211,7 @@ h1 {
   letter-spacing: -0.01em;
 }
 
-/* 输入框 */
+/* Inputs */
 input[type="text"],
 input[type="number"] {
   width: 100%;
@@ -175,7 +243,7 @@ input[type="text"]::placeholder {
   opacity: 0.6;
 }
 
-/* 复选框和标签 */
+/* Checkboxes and labels */
 label {
   display: inline-flex;
   align-items: center;
@@ -194,7 +262,7 @@ input[type="checkbox"] {
   accent-color: var(--primary);
 }
 
-/* 按钮 */
+/* Buttons */
 button {
   width: 100%;
   padding: 10px 16px;
@@ -240,7 +308,7 @@ button:last-of-type {
   margin-bottom: 0;
 }
 
-/* 结果容器 */
+/* Result container */
 #resultContainer {
   margin-top: 12px;
   padding: 12px;
@@ -278,7 +346,7 @@ button:last-of-type {
   white-space: pre-wrap;
 }
 
-/* Toast 通知 */
+/* Toast */
 #toast {
   display: none;
   position: fixed;
@@ -320,14 +388,16 @@ button:last-of-type {
   }
 }
 
-/* 复制按钮隐藏 */
-#copyMagnetLinks {
+#copyMagnetLinks,
+#exportMagnetLinks,
+#exportMagnetJson {
   display: none;
 }
 
-/* 进度显示 */
+/* Progress text */
 #refreshProgress,
-#movieProgress {
+#movieProgress,
+.progress-text {
   font-size: 11px;
   margin-top: 8px;
   padding: 8px 12px;
@@ -343,7 +413,11 @@ button:last-of-type {
   justify-content: center;
 }
 
-/* 进度条 */
+.progress-text.is-empty {
+  display: none;
+}
+
+/* Progress bar */
 .progress-bar-wrap {
   width: 100%;
   height: 4px;
@@ -371,34 +445,11 @@ button:last-of-type {
   100% { transform: translateX(400%); }
 }
 
-/* 配置区域样式 */
-.section > div[style*="margin-top"] {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  background: var(--bg);
-  border-radius: calc(var(--radius) - 2px);
-  border: 1px solid var(--border);
+#customSelector {
+  display: none;
 }
 
-.section > div[style*="margin-top"] label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  margin: 0;
-}
-
-.section > div[style*="margin-top"] input[type="number"] {
-  margin: 0;
-  padding: 4px 8px;
-  font-size: 12px;
-  text-align: center;
-}
-
-/* 键盘焦点样式 */
+/* Focus styles */
 button:focus-visible,
 select:focus-visible,
 input:focus-visible {
@@ -417,18 +468,18 @@ input:focus-visible {
   outline-offset: 1px;
 }
 
-/* 响应式和流畅过渡 */
+/* Transitions */
 * {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 底部间距 */
+/* Bottom spacing */
 body {
   padding-bottom: 8px;
 }
 
-/* 取消按钮 */
+/* Cancel button */
 .cancel-btn {
   background: #ef4444 !important;
   color: #ffffff !important;
@@ -438,7 +489,7 @@ body {
   background: #dc2626 !important;
 }
 
-/* 选择器配置 */
+/* Selector config */
 .selector-config {
   margin: 10px 0;
   padding: 10px 12px;
@@ -470,7 +521,7 @@ body {
   font-size: 12px;
 }
 
-/* 复选框标签 */
+/* Checkbox label */
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -480,7 +531,7 @@ body {
   color: var(--text-secondary);
 }
 
-/* 按钮行 */
+/* Button row */
 .button-row {
   display: flex;
   gap: 8px;
@@ -490,7 +541,7 @@ body {
   flex: 1;
 }
 
-/* 次要按钮 */
+/* Secondary button */
 .secondary-btn {
   background: var(--border) !important;
   color: var(--text) !important;
@@ -503,7 +554,7 @@ body {
   color: var(--bg) !important;
 }
 
-/* 可折叠区域 */
+/* Collapsible sections */
 .collapsible .section-header {
   display: flex;
   justify-content: space-between;
@@ -544,7 +595,7 @@ body {
   padding-top: 12px;
 }
 
-/* 历史记录列表 */
+/* History list */
 #historyList {
   margin-top: 10px;
   max-height: 200px;
@@ -593,7 +644,7 @@ body {
   flex-shrink: 0;
 }
 
-/* 历史记录状态样式 */
+/* History status */
 .history-item.history-running {
   border-left: 3px solid var(--accent);
   background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, var(--bg) 100%);
@@ -613,7 +664,7 @@ body {
   background: linear-gradient(90deg, rgba(245, 158, 11, 0.05) 0%, var(--bg) 100%);
 }
 
-/* 日志容器 */
+/* Log container */
 #logContainer {
   margin-top: 10px;
   max-height: 200px;
@@ -648,7 +699,7 @@ body {
 .log-error { color: #ef4444; }
 .log-warning { color: #f59e0b; }
 
-/* 网络状态 */
+/* Network status */
 .network-status {
   display: flex;
   align-items: center;
@@ -687,12 +738,8 @@ body {
   50% { opacity: 0.5; }
 }
 
-/* 导出按钮隐藏 */
-#exportMagnetLinks {
-  display: none;
-}
 
-/* 结果统计 */
+/* Result summary */
 .result-summary {
   padding: 8px 10px;
   background: var(--card-bg);
@@ -710,7 +757,7 @@ body {
   color: var(--success);
 }
 
-/* 链接列表 */
+/* Link list */
 .link-list {
   max-height: 150px;
   overflow-y: auto;

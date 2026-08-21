@@ -10,28 +10,14 @@ import {
   loadLogs
 } from './utils.js';
 
-// 入口
 document.addEventListener('DOMContentLoaded', async () => {
-  // 初始化主题
   initThemeToggle();
-
-  // 显示标签计数
   showTabCount();
-
-  // 加载持久化日志（先加载再记录启动日志）
   await loadLogs();
-
-  // 初始化各功能模块
   initMovieLinks();
   initTabReloader();
   initMagnetExtractor();
-
-  // 初始化可折叠区域
   initCollapsibles();
-
-  // 初始化网络状态检测
   initNetworkStatus();
-
-  // 记录启动日志
   addLog('扩展已加载', 'info');
 });

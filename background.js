@@ -1,369 +1,716 @@
 /**
- * Service worker：负责按顺序刷新当前窗口中的标签页，
- * 以及处理电影链接的批量打开任务。
+ * Service worker: sequential tab refresh and movie-link batch opening.
+ * Task state is persisted to chrome.storage.local so MV3 restarts can recover.
  */
+
+import {
+  ACTIONS,
+  ALARM_KEEP_ALIVE,
+  DEFAULTS,
+  SITE_PRESETS,
+  STORAGE_KEYS
+} from './constants.js';
+import { delay, randomBetween, sleep } from './delay-utils.js';
+import { createHistoryEntry, TASK_STATUS, updateHistoryEntry } from './history-store.js';
+import {
+  describeExtractionFailure,
+  filterDuplicateLinks,
+  isHttpUrl,
+  normalizeUrl,
+  resolveRelativeUrl
+} from './url-utils.js';
+
 let refreshTimeoutId = null;
 let isRefreshing = false;
-
-// 电影链接打开任务状态
 let movieTaskRunning = false;
 let movieTaskCancelled = false;
+let movieHistoryId = null;
+let refreshHistoryId = null;
+let movieGroupId = null;
 
-// 保存任务进度到存储（持久化）
-function saveTaskProgress(progress) {
-  chrome.storage.local.set({ movieTaskProgress: progress });
+function storageGet(keys) {
+  return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
 }
 
-// 清除任务进度
-function clearTaskProgress() {
-  chrome.storage.local.remove('movieTaskProgress');
+function storageSet(values) {
+  return new Promise((resolve) => chrome.storage.local.set(values, resolve));
 }
 
-// 网站选择器预设（与前端保持同步）
-const SITE_PRESETS = {
-  javdb: {
-    selector: '.movie-list.h.cols-4 a.box',
-    baseUrl: 'https://javdb.com'
-  }
-};
-
-// 获取当前所有标签页的 URL
-async function getOpenedTabUrls() {
-  return new Promise((resolve) => {
-    chrome.tabs.query({}, (tabs) => {
-      const urls = new Set(tabs.map(tab => tab.url).filter(Boolean));
-      resolve(urls);
-    });
-  });
+function storageRemove(keys) {
+  return new Promise((resolve) => chrome.storage.local.remove(keys, resolve));
 }
 
-// 过滤掉已经打开的链接
-function filterDuplicateLinks(links, openedUrls) {
-  const newLinks = [];
-  const skippedLinks = [];
-
-  for (const link of links) {
-    if (openedUrls.has(link)) {
-      skippedLinks.push(link);
-    } else {
-      newLinks.push(link);
-    }
-  }
-
-  return { newLinks, skippedLinks };
-}
-
-// 安全发送消息，忽略无监听者导致的 lastError
 function safeSendMessage(msg) {
   chrome.runtime.sendMessage(msg, () => {
     if (chrome.runtime.lastError) {
-      // 可在开发时查看，但正式忽略
-      // console.debug('safeSendMessage error:', chrome.runtime.lastError.message);
+      // Popup may be closed; storage remains the source of truth.
     }
   });
 }
 
-// 延迟函数（带随机抖动）
-function delay(ms) {
-  const jitter = (Math.random() - 0.5) * 0.6; // ±30%
-  const actualDelay = ms * (1 + jitter);
-  return new Promise(resolve => setTimeout(resolve, actualDelay));
+function startKeepAlive() {
+  chrome.alarms.create(ALARM_KEEP_ALIVE, { delayInMinutes: DEFAULTS.keepAliveMinutes });
 }
 
-// 获取页面链接 - 使用临时标签页方式（支持自定义选择器）
-async function fetchLinksFromUrl(url, selector, baseUrl) {
-  return new Promise((resolve) => {
-    // 创建临时标签页
-    chrome.tabs.create({ url, active: false }, (tab) => {
-      const tabId = tab.id;
+function stopKeepAliveIfIdle() {
+  if (!movieTaskRunning && !isRefreshing) {
+    chrome.alarms.clear(ALARM_KEEP_ALIVE);
+  }
+}
 
-      // 监听标签页加载完成
-      const listener = (updatedTabId, changeInfo) => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
-          // 执行脚本提取链接
-          chrome.scripting.executeScript({
-            target: { tabId },
-            func: (sel) => {
-              const links = [...document.querySelectorAll(sel)];
-              return links.map(link => {
-                const href = link.getAttribute('href');
-                // 返回href，后续在外部处理
-                return href;
-              });
-            },
-            args: [selector]
-          }, (results) => {
-            chrome.tabs.onUpdated.removeListener(listener);
-
-            if (results && results[0] && results[0].result) {
-              const hrefs = results[0].result;
-              // 处理相对路径
-              const fullUrls = hrefs.map(href => {
-                if (!href) return null;
-                // 如果已经是完整URL
-                if (href.startsWith('http://') || href.startsWith('https://')) {
-                  return href;
-                }
-                // 使用baseUrl拼接
-                if (baseUrl) {
-                  return `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`;
-                }
-                // 尝试从当前URL获取基础路径
-                try {
-                  const urlObj = new URL(url);
-                  return `${urlObj.origin}${href.startsWith('/') ? '' : '/'}${href}`;
-                } catch (e) {
-                  return href;
-                }
-              }).filter(Boolean);
-
-              // 关闭临时标签页
-              chrome.tabs.remove(tabId, () => {
-                resolve(fullUrls);
-              });
-            } else {
-              chrome.tabs.remove(tabId, () => {
-                resolve([]);
-              });
-            }
-          });
-        }
-      };
-
-      chrome.tabs.onUpdated.addListener(listener);
-
-      // 超时保护（10秒）
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        chrome.tabs.remove(tabId, () => {
-          if (chrome.runtime.lastError) {
-            // 标签可能已经被关闭
-          }
-          resolve([]);
-        });
-      }, 10000);
+function createTab(options) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.create(options, (tab) => {
+      if (chrome.runtime.lastError || !tab) {
+        reject(new Error(chrome.runtime.lastError?.message || 'Failed to create tab'));
+        return;
+      }
+      resolve(tab);
     });
   });
 }
 
-// 分批打开链接
-async function openLinksInBatches(urls, batchSize, delayMs, stats, openedUrls) {
-  for (let i = 0; i < urls.length; i += batchSize) {
-    if (movieTaskCancelled) {
-      clearTaskProgress();
-      safeSendMessage({ action: 'movieTaskCancelled' });
+function removeTab(tabId) {
+  return new Promise((resolve) => {
+    if (!tabId) {
+      resolve();
       return;
     }
-
-    const batch = urls.slice(i, i + batchSize);
-    batch.forEach(url => {
-      chrome.tabs.create({ url, active: false });
-      stats.openedTabs++; // 统计已打开的标签页
-      // 将新打开的链接添加到集合中，防止后续批次重复打开
-      openedUrls.add(url);
+    chrome.tabs.remove(tabId, () => {
+      resolve();
     });
+  });
+}
+
+function queryTabs(queryInfo) {
+  return new Promise((resolve) => {
+    chrome.tabs.query(queryInfo, (tabs) => resolve(tabs || []));
+  });
+}
+
+async function getOpenedTabUrls() {
+  const tabs = await queryTabs({});
+  return new Set(tabs.map((tab) => normalizeUrl(tab.url)).filter(Boolean));
+}
+
+async function persistMovieProgress(progress) {
+  await storageSet({ [STORAGE_KEYS.movieTaskProgress]: progress });
+}
+
+async function clearMovieProgress() {
+  await storageRemove(STORAGE_KEYS.movieTaskProgress);
+}
+
+async function persistRefreshProgress(progress) {
+  await storageSet({ [STORAGE_KEYS.refreshTaskProgress]: progress });
+}
+
+async function clearRefreshProgress() {
+  await storageRemove(STORAGE_KEYS.refreshTaskProgress);
+}
+
+function collectPageLinks(selector) {
+  const title = document.title || '';
+  const snippet = document.documentElement?.innerHTML
+    ? document.documentElement.innerHTML.slice(0, 25000)
+    : '';
+  const blocked = /just a moment/i.test(title)
+    || /cf-browser-verification|challenge-platform|cf-challenge/i.test(snippet)
+    || !!document.querySelector('#cf-wrapper, .cf-browser-verification, #challenge-form');
+  const bodyText = (document.body?.innerText || '').slice(0, 3000);
+  const login = /\/login/i.test(location.pathname)
+    || (!!document.querySelector('form input[type="password"]')
+      && /(javdb|sign in|登录|登入)/i.test(`${bodyText}${title}`));
+  const nodes = [...document.querySelectorAll(selector)];
+  return {
+    title,
+    hrefs: nodes.map((node) => node.getAttribute('href')).filter(Boolean),
+    selectorMatches: nodes.length,
+    blocked,
+    login,
+    hasMovieList: !!document.querySelector('.movie-list')
+  };
+}
+
+function executeCollect(tabId, selector) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func: collectPageLinks,
+      args: [selector]
+    }, (results) => {
+      if (chrome.runtime.lastError) {
+        resolve({ error: 'script_failed', message: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(results?.[0]?.result || { hrefs: [], error: 'script_failed' });
+    });
+  });
+}
+
+async function extractWithRetry(tabId, selector, pageUrl, baseUrl) {
+  const deadline = Date.now() + DEFAULTS.extractMaxWaitMs;
+  let last = { hrefs: [] };
+
+  while (Date.now() < deadline) {
+    last = await executeCollect(tabId, selector);
+    if (last.error || last.blocked || last.login || (last.hrefs && last.hrefs.length > 0)) {
+      break;
+    }
+    await sleep(DEFAULTS.extractPollMs);
+  }
+
+  const hrefs = (last.hrefs || [])
+    .map((href) => resolveRelativeUrl(href, baseUrl, pageUrl))
+    .filter((url) => url && isHttpUrl(url));
+
+  return { hrefs, diagnostic: last };
+}
+
+async function fetchLinksFromUrl(url, selector, baseUrl) {
+  let settled = false;
+  let timeoutId = null;
+  let tabId = null;
+  let listener = null;
+
+  const finish = async (result) => {
+    if (settled) return result;
+    settled = true;
+    if (timeoutId) clearTimeout(timeoutId);
+    if (listener) chrome.tabs.onUpdated.removeListener(listener);
+    await removeTab(tabId);
+    return result;
+  };
+
+  return new Promise((resolve) => {
+    chrome.tabs.create({ url, active: false }, async (tab) => {
+      if (chrome.runtime.lastError || !tab) {
+        resolve(await finish({
+          hrefs: [],
+          diagnostic: {
+            error: 'tab_create_failed',
+            message: chrome.runtime.lastError?.message || 'tab create failed'
+          }
+        }));
+        return;
+      }
+
+      tabId = tab.id;
+      let extractStarted = false;
+
+      const runExtract = async () => {
+        if (settled || extractStarted) return;
+        extractStarted = true;
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (listener) {
+          chrome.tabs.onUpdated.removeListener(listener);
+          listener = null;
+        }
+        const extracted = await extractWithRetry(tabId, selector, url, baseUrl);
+        resolve(await finish(extracted));
+      };
+
+      listener = (updatedTabId, changeInfo) => {
+        if (updatedTabId !== tabId || changeInfo.status !== 'complete') return;
+        runExtract();
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+
+      chrome.tabs.get(tabId, (fresh) => {
+        if (!settled && fresh?.status === 'complete') {
+          runExtract();
+        }
+      });
+
+      timeoutId = setTimeout(async () => {
+        resolve(await finish({ hrefs: [], diagnostic: { error: 'timeout' } }));
+      }, DEFAULTS.extractTimeoutMs + DEFAULTS.extractMaxWaitMs);
+    });
+  });
+}
+
+async function addTabsToGroup(tabIds) {
+  if (!tabIds.length) return;
+  try {
+    if (movieGroupId == null) {
+      movieGroupId = await chrome.tabs.group({ tabIds });
+      await chrome.tabGroups.update(movieGroupId, { title: 'Movie Links', color: 'blue' });
+    } else {
+      await chrome.tabs.group({ tabIds, groupId: movieGroupId });
+    }
+  } catch (error) {
+    console.warn('Failed to group tabs:', error);
+    movieGroupId = null;
+  }
+}
+
+async function openLinksInBatches(urls, batchSize, delayMs, stats, openedUrls, openInGroup, persistFn) {
+  for (let i = 0; i < urls.length; i += batchSize) {
+    if (movieTaskCancelled) return { cancelled: true };
+
+    const batch = urls.slice(i, i + batchSize).filter(isHttpUrl);
+    const createdIds = [];
+    await Promise.all(batch.map(async (url) => {
+      try {
+        const tab = await createTab({ url, active: false });
+        createdIds.push(tab.id);
+        stats.openedTabs += 1;
+        openedUrls.add(normalizeUrl(url));
+      } catch (error) {
+        stats.failedTabs += 1;
+        console.warn('Failed to open tab:', url, error);
+      }
+    }));
+
+    if (openInGroup) {
+      await addTabsToGroup(createdIds);
+    }
 
     const progress = Math.min(i + batchSize, urls.length);
-    const batchProgressMsg = `进度: ${progress}/${urls.length} 链接已打开`;
+    const message = `进度: ${progress}/${urls.length} 链接已打开`;
     safeSendMessage({
-      action: 'movieProgress',
+      action: ACTIONS.movieProgress,
       current: progress,
       total: urls.length,
-      message: batchProgressMsg
+      message
     });
-    // 持久化保存批次进度
-    saveTaskProgress({
-      running: true,
-      message: batchProgressMsg,
+    await persistFn({
+      message,
       current: progress,
-      total: urls.length
+      total: urls.length,
+      stats: { ...stats }
     });
 
     if (i + batchSize < urls.length) {
       await delay(delayMs);
     }
   }
+  return { cancelled: false };
 }
 
-// 处理电影链接打开任务
-async function handleMovieLinksTask(request) {
+function skippedSuffix(stats) {
+  return stats.skippedLinks > 0 ? `，跳过 ${stats.skippedLinks} 个已打开的链接` : '';
+}
+
+async function finalizeMovieTask(kind, message, historyId) {
+  movieTaskRunning = false;
+  movieTaskCancelled = false;
+  movieGroupId = null;
+  await clearMovieProgress();
+  stopKeepAliveIfIdle();
+
+  if (kind === 'cancelled') {
+    await updateHistoryEntry(historyId, {
+      status: TASK_STATUS.CANCELLED,
+      result: '用户取消任务'
+    });
+    safeSendMessage({ action: ACTIONS.movieTaskCancelled });
+    return;
+  }
+
+  if (kind === 'error') {
+    await updateHistoryEntry(historyId, {
+      status: TASK_STATUS.FAILED,
+      result: message
+    });
+    safeSendMessage({ action: ACTIONS.movieError, message });
+    return;
+  }
+
+  await updateHistoryEntry(historyId, {
+    status: TASK_STATUS.COMPLETED,
+    result: message
+  });
+  safeSendMessage({ action: ACTIONS.movieComplete, message });
+}
+
+async function handleMovieLinksTask(request, { resumed = false } = {}) {
+  if (movieTaskRunning) {
+    return;
+  }
+
   movieTaskRunning = true;
   movieTaskCancelled = false;
+  movieGroupId = request.resumeState?.groupId ?? null;
+  startKeepAlive();
 
-  const { url, isTopMode, batchSize, delaySeconds, selector, baseUrl } = request;
-  const delayMs = delaySeconds * 1000;
+  const {
+    url,
+    isTopMode,
+    batchSize,
+    delaySeconds,
+    selector,
+    baseUrl,
+    topPages,
+    openInGroup
+  } = request;
 
-  // 保存初始任务状态
-  saveTaskProgress({
-    running: true,
-    url: url,
-    isTopMode: isTopMode,
-    message: '任务已启动，可以关闭此窗口',
-    startTime: Date.now()
-  });
-
-  // 使用传入的选择器或默认选择器
+  const delayMs = (delaySeconds || DEFAULTS.delaySeconds) * 1000;
+  const pageCount = Math.min(
+    Math.max(parseInt(topPages, 10) || DEFAULTS.topPages, 1),
+    DEFAULTS.maxTopPages
+  );
   const linkSelector = selector || SITE_PRESETS.javdb.selector;
   const linkBaseUrl = baseUrl || SITE_PRESETS.javdb.baseUrl;
-
-  // 获取当前已打开的标签页 URL
   const openedUrls = await getOpenedTabUrls();
+  if (Array.isArray(request.resumeState?.openedUrls)) {
+    for (const opened of request.resumeState.openedUrls) {
+      openedUrls.add(normalizeUrl(opened));
+    }
+  }
 
-  // 统计数据
-  const stats = {
+  const stats = request.resumeState?.stats || {
     totalLinks: 0,
     openedTabs: 0,
-    skippedLinks: 0
+    skippedLinks: 0,
+    failedTabs: 0
   };
+
+  if (request.historyId) {
+    movieHistoryId = request.historyId;
+  } else if (request.resumeState?.historyId) {
+    movieHistoryId = request.resumeState.historyId;
+  } else {
+    const created = await createHistoryEntry({
+      action: '电影链接打开',
+      result: `正在处理: ${String(url).slice(0, 50)}`
+    });
+    movieHistoryId = created.id;
+  }
+
+  const persist = async (extra = {}) => {
+    await persistMovieProgress({
+      running: true,
+      type: 'movie',
+      url,
+      isTopMode,
+      historyId: movieHistoryId,
+      config: {
+        url,
+        isTopMode,
+        batchSize,
+        delaySeconds,
+        selector: linkSelector,
+        baseUrl: linkBaseUrl,
+        topPages: pageCount,
+        openInGroup,
+        historyId: movieHistoryId
+      },
+      openedUrls: [...openedUrls],
+      groupId: movieGroupId,
+      startTime: request.resumeState?.startTime || Date.now(),
+      stats: { ...stats },
+      ...extra
+    });
+  };
+
+  await persist({ message: resumed ? '任务已恢复' : '任务已启动，可以关闭此窗口' });
 
   try {
     if (isTopMode) {
-      // TOP 模式：处理 8 页
-      for (let page = 1; page <= 8; page++) {
-        if (movieTaskCancelled) break;
+      const startPage = request.resumeState?.currentPage || 1;
+      let consecutiveEmpty = request.resumeState?.consecutiveEmpty || 0;
 
-        const progressMsg = `正在处理第 ${page}/8 页...`;
+      for (let page = startPage; page <= pageCount; page += 1) {
+        if (movieTaskCancelled) {
+          await finalizeMovieTask('cancelled', '', movieHistoryId);
+          return;
+        }
+
+        const progressMsg = `正在处理第 ${page}/${pageCount} 页...`;
         safeSendMessage({
-          action: 'movieProgress',
-          message: progressMsg
-        });
-        // 持久化保存进度
-        saveTaskProgress({
-          running: true,
-          url: url,
-          isTopMode: true,
+          action: ACTIONS.movieProgress,
           message: progressMsg,
           currentPage: page,
-          totalPages: 8,
-          stats: { ...stats }
+          totalPages: pageCount
+        });
+        await persist({
+          message: progressMsg,
+          currentPage: page,
+          totalPages: pageCount,
+          consecutiveEmpty
         });
 
         const pageUrl = new URL(url);
         pageUrl.searchParams.set('page', page);
-        const links = await fetchLinksFromUrl(pageUrl.toString(), linkSelector, linkBaseUrl);
+        const { hrefs, diagnostic } = await fetchLinksFromUrl(
+          pageUrl.toString(),
+          linkSelector,
+          linkBaseUrl
+        );
 
-        if (links.length > 0) {
-          stats.totalLinks += links.length;
+        if (movieTaskCancelled) {
+          await finalizeMovieTask('cancelled', '', movieHistoryId);
+          return;
+        }
 
-          // 过滤已打开的链接
-          const { newLinks, skippedLinks } = filterDuplicateLinks(links, openedUrls);
+        if (hrefs.length === 0) {
+          consecutiveEmpty += 1;
+          const reason = describeExtractionFailure(diagnostic);
+          safeSendMessage({
+            action: ACTIONS.movieProgress,
+            message: `第 ${page} 页: ${reason}`
+          });
+          if (diagnostic?.blocked || diagnostic?.login) {
+            await finalizeMovieTask('error', reason, movieHistoryId);
+            return;
+          }
+          if (consecutiveEmpty >= DEFAULTS.emptyPagesToStop) {
+            break;
+          }
+        } else {
+          consecutiveEmpty = 0;
+          stats.totalLinks += hrefs.length;
+          const { newLinks, skippedLinks } = filterDuplicateLinks(hrefs, openedUrls);
           stats.skippedLinks += skippedLinks.length;
-
           if (newLinks.length > 0) {
-            await openLinksInBatches(newLinks, batchSize, delayMs, stats, openedUrls);
+            const result = await openLinksInBatches(
+              newLinks,
+              batchSize,
+              delayMs,
+              stats,
+              openedUrls,
+              openInGroup,
+              persist
+            );
+            if (result.cancelled || movieTaskCancelled) {
+              await finalizeMovieTask('cancelled', '', movieHistoryId);
+              return;
+            }
           }
         }
 
-        // 页面间额外延迟
-        if (page < 8 && !movieTaskCancelled) {
-          await delay(5000);
+        if (page < pageCount && !movieTaskCancelled) {
+          await delay(randomBetween(DEFAULTS.topPageDelayMinMs, DEFAULTS.topPageDelayMaxMs), { jitterRatio: 0 });
         }
       }
 
-      if (!movieTaskCancelled) {
-        const skippedMsg = stats.skippedLinks > 0 ? `，跳过 ${stats.skippedLinks} 个已打开的链接` : '';
-        safeSendMessage({
-          action: 'movieComplete',
-          message: `✓ 所有页面处理完毕！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedMsg}`
-        });
+      if (movieTaskCancelled) {
+        await finalizeMovieTask('cancelled', '', movieHistoryId);
+        return;
       }
-    } else {
-      // 单页模式
-      const links = await fetchLinksFromUrl(url, linkSelector, linkBaseUrl);
-      if (links.length > 0) {
-        stats.totalLinks = links.length;
 
-        // 过滤已打开的链接
-        const { newLinks, skippedLinks } = filterDuplicateLinks(links, openedUrls);
-        stats.skippedLinks = skippedLinks.length;
+      const message = `✓ 所有页面处理完毕！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedSuffix(stats)}`;
+      await finalizeMovieTask('complete', message, movieHistoryId);
+      return;
+    }
 
-        if (newLinks.length > 0) {
-          await openLinksInBatches(newLinks, batchSize, delayMs, stats, openedUrls);
-        }
+    const { hrefs, diagnostic } = await fetchLinksFromUrl(url, linkSelector, linkBaseUrl);
+    if (movieTaskCancelled) {
+      await finalizeMovieTask('cancelled', '', movieHistoryId);
+      return;
+    }
 
-        const skippedMsg = stats.skippedLinks > 0 ? `，跳过 ${stats.skippedLinks} 个已打开的链接` : '';
-        safeSendMessage({
-          action: 'movieComplete',
-          message: `✓ 完成！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedMsg}`
-        });
-      } else {
-        safeSendMessage({
-          action: 'movieComplete',
-          message: '未找到任何链接'
-        });
+    if (hrefs.length === 0) {
+      const reason = describeExtractionFailure(diagnostic);
+      const kind = diagnostic?.blocked || diagnostic?.login || diagnostic?.error
+        ? 'error'
+        : 'complete';
+      await finalizeMovieTask(kind, reason, movieHistoryId);
+      return;
+    }
+
+    stats.totalLinks = hrefs.length;
+    const { newLinks, skippedLinks } = filterDuplicateLinks(hrefs, openedUrls);
+    stats.skippedLinks = skippedLinks.length;
+    if (newLinks.length > 0) {
+      const result = await openLinksInBatches(
+        newLinks,
+        batchSize,
+        delayMs,
+        stats,
+        openedUrls,
+        openInGroup,
+        persist
+      );
+      if (result.cancelled || movieTaskCancelled) {
+        await finalizeMovieTask('cancelled', '', movieHistoryId);
+        return;
       }
     }
+
+    const message = `✓ 完成！总共发现 ${stats.totalLinks} 个链接，已打开 ${stats.openedTabs} 个标签页${skippedSuffix(stats)}`;
+    await finalizeMovieTask('complete', message, movieHistoryId);
   } catch (error) {
-    console.error('处理电影链接失败:', error);
-    safeSendMessage({
-      action: 'movieError',
-      message: '处理失败，请检查 URL'
-    });
-  } finally {
-    movieTaskRunning = false;
-    movieTaskCancelled = false;
-    // 任务结束，清除进度
-    clearTaskProgress();
+    console.error('Movie link task failed:', error);
+    await finalizeMovieTask('error', '处理失败，请检查 URL', movieHistoryId);
   }
 }
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'startRefreshing') {
-    // 若已在刷新则先停止旧任务
-    if (isRefreshing && refreshTimeoutId) {
-      clearTimeout(refreshTimeoutId);
-    }
-    isRefreshing = true;
+async function startRefreshing(request) {
+  if (isRefreshing && refreshTimeoutId) {
+    clearTimeout(refreshTimeoutId);
+  }
+  isRefreshing = true;
+  startKeepAlive();
 
-    // 查询参数：是否排除pinned标签
-    const queryOptions = { currentWindow: true };
-    if (request.excludePinned) {
-      queryOptions.pinned = false;
-    }
-
-    chrome.tabs.query(queryOptions, (tabs) => {
-      let index = 0;
-      const total = tabs.length;
-
-      const refreshNextTab = () => {
-        if (!isRefreshing) return; // 若已停止则结束
-        if (index < tabs.length) {
-          chrome.tabs.reload(tabs[index].id, () => {
-            safeSendMessage({ action: 'refreshProgress', current: index + 1, total });
-            index++;
-            refreshTimeoutId = setTimeout(refreshNextTab, request.interval);
-          });
-        } else {
-          safeSendMessage({ action: 'refreshComplete', total });
-          // 所有标签刷新完毕，自动停止
-          isRefreshing = false;
-          refreshTimeoutId = null;
-        }
-      };
-
-      refreshNextTab();
+  refreshHistoryId = request.historyId || null;
+  if (!refreshHistoryId) {
+    const created = await createHistoryEntry({
+      action: '标签页刷新',
+      result: `正在刷新，间隔 ${request.interval / 1000} 秒`
     });
-  } else if (request.action === 'stopRefreshing') {
+    refreshHistoryId = created.id;
+  }
+
+  const queryOptions = { currentWindow: true };
+  if (request.excludePinned) {
+    queryOptions.pinned = false;
+  }
+
+  const tabs = await queryTabs(queryOptions);
+  let index = 0;
+  const total = tabs.length;
+
+  await persistRefreshProgress({
+    running: true,
+    type: 'refresh',
+    historyId: refreshHistoryId,
+    interval: request.interval,
+    excludePinned: !!request.excludePinned,
+    current: 0,
+    total,
+    message: '刷新已开始'
+  });
+
+  const refreshNextTab = async () => {
+    if (!isRefreshing) return;
+    if (index < tabs.length) {
+      chrome.tabs.reload(tabs[index].id, async () => {
+        if (!isRefreshing) return;
+        safeSendMessage({ action: ACTIONS.refreshProgress, current: index + 1, total });
+        await persistRefreshProgress({
+          running: true,
+          type: 'refresh',
+          historyId: refreshHistoryId,
+          current: index + 1,
+          total,
+          message: `刷新进度: ${index + 1} / ${total}`
+        });
+        index += 1;
+        refreshTimeoutId = setTimeout(refreshNextTab, request.interval);
+      });
+      return;
+    }
+
     isRefreshing = false;
-    if (refreshTimeoutId) {
-      clearTimeout(refreshTimeoutId);
-      refreshTimeoutId = null;
-    }
-  } else if (request.action === 'openMovieLinks') {
-    // 处理电影链接打开任务
-    if (!movieTaskRunning) {
-      handleMovieLinksTask(request);
-      sendResponse({ success: true });
-    } else {
-      sendResponse({ success: false, message: '任务正在进行中' });
-    }
-    return true; // 保持消息通道打开
-  } else if (request.action === 'cancelMovieTask') {
-    movieTaskCancelled = true;
+    refreshTimeoutId = null;
+    await clearRefreshProgress();
+    stopKeepAliveIfIdle();
+    await updateHistoryEntry(refreshHistoryId, {
+      status: TASK_STATUS.COMPLETED,
+      result: `刷新了 ${total} 个标签页`
+    });
+    refreshHistoryId = null;
+    safeSendMessage({ action: ACTIONS.refreshComplete, total });
+  };
+
+  refreshNextTab();
+}
+
+async function stopRefreshing({ cancelledByUser = true } = {}) {
+  isRefreshing = false;
+  if (refreshTimeoutId) {
+    clearTimeout(refreshTimeoutId);
+    refreshTimeoutId = null;
+  }
+  await clearRefreshProgress();
+  stopKeepAliveIfIdle();
+  if (refreshHistoryId && cancelledByUser) {
+    await updateHistoryEntry(refreshHistoryId, {
+      status: TASK_STATUS.CANCELLED,
+      result: '用户手动停止'
+    });
+  }
+  refreshHistoryId = null;
+}
+
+async function recoverInterruptedTasks() {
+  const data = await storageGet([
+    STORAGE_KEYS.movieTaskProgress,
+    STORAGE_KEYS.refreshTaskProgress
+  ]);
+
+  const movie = data[STORAGE_KEYS.movieTaskProgress];
+  if (movie?.running && movie.config) {
+    handleMovieLinksTask({
+      ...movie.config,
+      historyId: movie.historyId || movie.config.historyId,
+      resumeState: movie
+    }, { resumed: true });
+  }
+
+  const refresh = data[STORAGE_KEYS.refreshTaskProgress];
+  if (refresh?.running) {
+    await updateHistoryEntry(refresh.historyId, {
+      status: TASK_STATUS.FAILED,
+      result: '后台重启，刷新任务已中断'
+    });
+    await clearRefreshProgress();
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== ALARM_KEEP_ALIVE) return;
+  if (movieTaskRunning || isRefreshing) {
+    startKeepAlive();
+  }
+});
+
+recoverInterruptedTasks();
+
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  if (request.action === ACTIONS.startRefreshing) {
+    startRefreshing(request);
     sendResponse({ success: true });
-  } else if (request.action === 'getMovieTaskStatus') {
-    // 返回当前任务状态
-    sendResponse({ running: movieTaskRunning });
     return true;
   }
+
+  if (request.action === ACTIONS.stopRefreshing) {
+    stopRefreshing({ cancelledByUser: true }).then(() => sendResponse({ success: true }));
+    return true;
+  }
+
+  if (request.action === ACTIONS.openMovieLinks) {
+    if (movieTaskRunning) {
+      sendResponse({ success: false, message: '任务正在进行中' });
+      return true;
+    }
+    handleMovieLinksTask(request);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (request.action === ACTIONS.cancelMovieTask) {
+    movieTaskCancelled = true;
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (request.action === ACTIONS.getMovieTaskStatus) {
+    storageGet([STORAGE_KEYS.movieTaskProgress]).then((data) => {
+      const progress = data[STORAGE_KEYS.movieTaskProgress] || null;
+      sendResponse({
+        running: movieTaskRunning || !!(progress && progress.running),
+        progress
+      });
+    });
+    return true;
+  }
+
+  if (request.action === ACTIONS.getRefreshTaskStatus) {
+    storageGet([STORAGE_KEYS.refreshTaskProgress]).then((data) => {
+      const progress = data[STORAGE_KEYS.refreshTaskProgress] || null;
+      sendResponse({
+        running: isRefreshing || !!(progress && progress.running),
+        progress
+      });
+    });
+    return true;
+  }
+
+  return false;
 });

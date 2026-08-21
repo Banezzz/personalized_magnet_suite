@@ -1,6 +1,8 @@
 import { showToast, addLog, saveHistory, createHistory, updateHistory, TASK_STATUS } from './utils.js';
+import { deduplicateAndValidate, flattenMagnetCandidates } from './magnet-utils.js';
+import { ensureOriginsForTabs } from './permissions.js';
+import { isRestrictedTabUrl } from './url-utils.js';
 
-// 当前任务的历史记录 ID
 let currentExtractHistoryId = null;
 
 export function initMagnetExtractor() {
@@ -8,15 +10,14 @@ export function initMagnetExtractor() {
   const extractAllBtn = document.getElementById('extractAllMagnetLinks');
   const copyBtn = document.getElementById('copyMagnetLinks');
   const exportBtn = document.getElementById('exportMagnetLinks');
+  const exportJsonBtn = document.getElementById('exportMagnetJson');
 
   if (extractAllBtn) {
-    extractAllBtn.addEventListener('click', () => extractLinks({ firstOnly: false, copyBtn, exportBtn }));
+    extractAllBtn.addEventListener('click', () => extractLinks({ firstOnly: false }));
   }
-
   if (extractFirstBtn) {
-    extractFirstBtn.addEventListener('click', () => extractLinks({ firstOnly: true, copyBtn, exportBtn }));
+    extractFirstBtn.addEventListener('click', () => extractLinks({ firstOnly: true }));
   }
-
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
       const links = getExtractedLinks();
@@ -33,7 +34,6 @@ export function initMagnetExtractor() {
       });
     });
   }
-
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
       const links = getExtractedLinks();
@@ -41,171 +41,204 @@ export function initMagnetExtractor() {
         showToast('没有可导出的链接');
         return;
       }
-      exportToFile(links);
+      exportToFile(links.join('\n'), 'txt', 'text/plain');
+    });
+  }
+  if (exportJsonBtn) {
+    exportJsonBtn.addEventListener('click', () => {
+      const payload = window.__lastMagnetExport;
+      if (!payload || payload.links.length === 0) {
+        showToast('没有可导出的链接');
+        return;
+      }
+      exportToFile(JSON.stringify(payload, null, 2), 'json', 'application/json');
     });
   }
 }
 
-// 获取已提取的链接
 function getExtractedLinks() {
   const container = document.getElementById('resultContainer');
-  const linkDivs = Array.from(container.querySelectorAll('.magnet-link'));
-  return linkDivs.map(div => div.textContent);
+  return Array.from(container.querySelectorAll('.magnet-link')).map((div) => div.textContent);
 }
 
-// 导出为TXT文件
-function exportToFile(links) {
-  const content = links.join('\n');
-  const blob = new Blob([content], { type: 'text/plain' });
+function exportToFile(content, extension, mime) {
+  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const filename = `magnet_links_${timestamp}.txt`;
-
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const filename = `magnet_links_${timestamp}.${extension}`;
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
-
-  showToast(`已导出 ${links.length} 条链接到 ${filename}`);
-  addLog(`导出了 ${links.length} 条链接到文件`, 'success');
+  showToast(`已导出到 ${filename}`);
+  addLog(`导出了文件 ${filename}`, 'success');
   saveHistory({
     action: '磁力链接导出',
-    result: `导出 ${links.length} 条链接`
+    result: `导出 ${filename}`
   });
 }
 
-// 验证磁力链接格式
-function isValidMagnetLink(link) {
-  if (!link || typeof link !== 'string') return false;
-  // 验证基本格式：magnet:?xt=urn:btih:
-  return /^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i.test(link);
+function collectMagnetsFromPage() {
+  const items = [];
+  const push = (href, sizeText) => {
+    if (!href || typeof href !== 'string') return;
+    const trimmed = href.trim();
+    if (!trimmed.toLowerCase().startsWith('magnet:')) return;
+    items.push({ href: trimmed, sizeText: sizeText || '' });
+  };
+
+  document.querySelectorAll('a[href^="magnet:"]').forEach((anchor) => {
+    const row = anchor.closest('tr, li, .item, .magnet-name, .column');
+    push(anchor.href, row ? row.innerText : anchor.textContent);
+  });
+  document.querySelectorAll('[data-clipboard-text]').forEach((el) => {
+    push(el.getAttribute('data-clipboard-text'), (el.closest('tr, li, .item') || el).innerText);
+  });
+  return items;
 }
 
-// 去重和验证
-function deduplicateAndValidate(links) {
-  const seen = new Set();
-  const validLinks = [];
-  let invalidCount = 0;
-  let duplicateCount = 0;
-
-  for (const link of links) {
-    if (!isValidMagnetLink(link)) {
-      invalidCount++;
-      continue;
-    }
-
-    // 提取 btih hash 进行去重（忽略后续参数）
-    const hashMatch = link.match(/btih:([a-zA-Z0-9]{32,40})/i);
-    if (hashMatch) {
-      const hash = hashMatch[1].toLowerCase();
-      if (seen.has(hash)) {
-        duplicateCount++;
-        continue;
+function executeOnTab(tabId) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func: collectMagnetsFromPage
+    }, (results) => {
+      if (chrome.runtime.lastError) {
+        resolve({ error: chrome.runtime.lastError.message, items: [] });
+        return;
       }
-      seen.add(hash);
-      validLinks.push(link);
-    }
-  }
-
-  return { validLinks, invalidCount, duplicateCount };
+      resolve({ error: null, items: results?.[0]?.result || [] });
+    });
+  });
 }
 
-function extractLinks({ firstOnly, copyBtn, exportBtn }) {
+function setExtractBusy(isBusy) {
   const extractFirstBtn = document.getElementById('extractMagnetLinks');
   const extractAllBtn = document.getElementById('extractAllMagnetLinks');
+  if (extractFirstBtn) extractFirstBtn.disabled = isBusy;
+  if (extractAllBtn) extractAllBtn.disabled = isBusy;
+}
 
-  // 禁用按钮防止重复点击
-  if (extractFirstBtn) extractFirstBtn.disabled = true;
-  if (extractAllBtn) extractAllBtn.disabled = true;
-
-  addLog(`开始提取磁力链接 (${firstOnly ? '每页第一条' : '全部'})`, 'info');
-
-  currentExtractHistoryId = createHistory({
-    action: '磁力链接提取',
-    result: `正在提取 (${firstOnly ? '每页第一条' : '全部'})...`
-  });
-
-  chrome.tabs.query({ currentWindow: true }, (tabs) => {
-    const results = [];
-    const promises = [];
-
-    tabs.forEach((tab) => {
-      if (!tab.url.startsWith('chrome://')) {
-        const promise = new Promise((resolve) => {
-          chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: (first) => {
-              const links = [...document.querySelectorAll('a[href^="magnet:"]')];
-              if (first) {
-                return links.length > 0 ? links[0].href : null;
-              }
-              return links.map(l => l.href);
-            },
-            args: [firstOnly]
-          }, (executeResults) => {
-            if (executeResults && executeResults[0]) {
-              const data = executeResults[0].result;
-              if (data) {
-                Array.isArray(data) ? results.push(...data) : results.push(data);
-              }
-            }
-            resolve();
-          });
-        });
-        promises.push(promise);
-      }
-    });
-
-    Promise.all(promises).then(() => {
-      // 恢复按钮状态
-      if (extractFirstBtn) extractFirstBtn.disabled = false;
-      if (extractAllBtn) extractAllBtn.disabled = false;
-
-      const { validLinks, invalidCount, duplicateCount } = deduplicateAndValidate(results);
-      displayResults(validLinks, tabs.length, results.length, invalidCount, duplicateCount);
-
-      if (validLinks.length > 0) {
-        copyBtn.style.display = 'block';
-        exportBtn.style.display = 'block';
-      }
-
-      addLog(`提取完成: ${validLinks.length} 条有效链接`, 'success');
-
-      if (currentExtractHistoryId) {
-        updateHistory(currentExtractHistoryId, {
-          status: TASK_STATUS.COMPLETED,
-          result: `${validLinks.length} 条有效，${duplicateCount} 条重复，${invalidCount} 条无效`
-        });
-        currentExtractHistoryId = null;
-      }
-    });
+function setExportVisible(visible) {
+  ['copyMagnetLinks', 'exportMagnetLinks', 'exportMagnetJson'].forEach((id) => {
+    const button = document.getElementById(id);
+    if (button) button.style.display = visible ? 'block' : 'none';
   });
 }
 
-function displayResults(validLinks, totalTabs, rawCount, invalidCount, duplicateCount) {
-  const container = document.getElementById('resultContainer');
-  container.innerHTML = '';
+async function extractLinks({ firstOnly }) {
+  setExtractBusy(true);
+  addLog(`开始提取磁力链接 (${firstOnly ? '每页首选' : '全部'})`, 'info');
 
-  // 统计信息
+  currentExtractHistoryId = await createHistory({
+    action: '磁力链接提取',
+    result: `正在提取 (${firstOnly ? '每页首选' : '全部'})...`
+  });
+
+  chrome.tabs.query({ currentWindow: true }, async (tabs) => {
+    const scannable = tabs.filter((tab) => !isRestrictedTabUrl(tab.url));
+    await ensureOriginsForTabs(scannable);
+
+    const perTab = [];
+    const rawLinks = [];
+    let tabsWithMagnets = 0;
+    let tabsEmpty = 0;
+    let tabsFailed = 0;
+
+    await Promise.all(scannable.map(async (tab) => {
+      const result = await executeOnTab(tab.id);
+      if (result.error) {
+        tabsFailed += 1;
+        perTab.push({ tabUrl: tab.url, magnets: [], error: result.error });
+        return;
+      }
+      const magnets = flattenMagnetCandidates(result.items, firstOnly);
+      if (magnets.length === 0) {
+        tabsEmpty += 1;
+      } else {
+        tabsWithMagnets += 1;
+        rawLinks.push(...magnets);
+      }
+      perTab.push({ tabUrl: tab.url, magnets, error: null });
+    }));
+
+    setExtractBusy(false);
+
+    const { validLinks, invalidCount, duplicateCount } = deduplicateAndValidate(rawLinks);
+    const stats = {
+      totalTabs: tabs.length,
+      scannedTabs: scannable.length,
+      tabsWithMagnets,
+      tabsEmpty,
+      tabsFailed,
+      rawCount: rawLinks.length,
+      validCount: validLinks.length,
+      invalidCount,
+      duplicateCount
+    };
+    displayResults(validLinks, stats);
+    setExportVisible(validLinks.length > 0);
+
+    window.__lastMagnetExport = {
+      generatedAt: new Date().toISOString(),
+      firstOnly,
+      stats,
+      links: validLinks,
+      tabs: perTab
+    };
+
+    addLog(
+      `提取完成: ${validLinks.length} 条有效，${tabsWithMagnets} 页有链接，${tabsEmpty} 页为空，${tabsFailed} 页失败`,
+      'success'
+    );
+
+    if (currentExtractHistoryId) {
+      updateHistory(currentExtractHistoryId, {
+        status: TASK_STATUS.COMPLETED,
+        result: `${validLinks.length} 条有效，${tabsWithMagnets} 页有链接，${tabsFailed} 页失败`
+      });
+      currentExtractHistoryId = null;
+    }
+  });
+}
+
+function displayResults(validLinks, stats) {
+  const container = document.getElementById('resultContainer');
+  container.replaceChildren();
+
   const summary = document.createElement('div');
   summary.className = 'result-summary';
-  summary.innerHTML = `
-    <div>总标签数: ${totalTabs}</div>
-    <div>原始链接: ${rawCount}</div>
-    <div>有效链接: <strong>${validLinks.length}</strong></div>
-    ${duplicateCount > 0 ? `<div>去除重复: ${duplicateCount}</div>` : ''}
-    ${invalidCount > 0 ? `<div>无效格式: ${invalidCount}</div>` : ''}
-  `;
+  const lines = [
+    `总标签数: ${stats.totalTabs}`,
+    `已扫描: ${stats.scannedTabs}`,
+    `有磁力: ${stats.tabsWithMagnets}`,
+    `无磁力: ${stats.tabsEmpty}`,
+    `失败: ${stats.tabsFailed}`,
+    `原始链接: ${stats.rawCount}`,
+    `有效链接: ${stats.validCount}`
+  ];
+  if (stats.duplicateCount > 0) lines.push(`去除重复: ${stats.duplicateCount}`);
+  if (stats.invalidCount > 0) lines.push(`无效格式: ${stats.invalidCount}`);
+
+  lines.forEach((line, index) => {
+    const row = document.createElement('div');
+    if (index === lines.length - 1 || line.startsWith('有效链接')) {
+      const strong = document.createElement('strong');
+      strong.textContent = line;
+      row.appendChild(strong);
+    } else {
+      row.textContent = line;
+    }
+    summary.appendChild(row);
+  });
   container.appendChild(summary);
 
   if (validLinks.length > 0) {
     const linkList = document.createElement('div');
     linkList.className = 'link-list';
-
-    // 使用 DocumentFragment 批量创建DOM
     const fragment = document.createDocumentFragment();
     validLinks.forEach((link, index) => {
       const div = document.createElement('div');
@@ -215,23 +248,21 @@ function displayResults(validLinks, totalTabs, rawCount, invalidCount, duplicate
       fragment.appendChild(div);
     });
     linkList.appendChild(fragment);
-
-    // 事件委托：单个监听器处理所有链接点击
-    linkList.addEventListener('click', (e) => {
-      const magnetDiv = e.target.closest('.magnet-link');
+    linkList.addEventListener('click', (event) => {
+      const magnetDiv = event.target.closest('.magnet-link');
       if (!magnetDiv) return;
       navigator.clipboard.writeText(magnetDiv.textContent).then(() => {
         showToast('链接已复制');
-        // 视觉反馈：短暂高亮已复制的链接
         magnetDiv.classList.add('copied');
         setTimeout(() => magnetDiv.classList.remove('copied'), 600);
       });
     });
     container.appendChild(linkList);
-  } else {
-    const noResult = document.createElement('div');
-    noResult.textContent = '未找到有效的磁力链接';
-    noResult.style.color = 'var(--text-secondary)';
-    container.appendChild(noResult);
+    return;
   }
+
+  const noResult = document.createElement('div');
+  noResult.textContent = '未找到有效的磁力链接';
+  noResult.className = 'empty-result';
+  container.appendChild(noResult);
 }

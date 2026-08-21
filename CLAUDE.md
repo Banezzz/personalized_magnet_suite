@@ -1,193 +1,113 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for working in this Manifest v3 Chrome extension.
 
 ## Project Overview
 
-Chrome extension (Manifest v3) that provides comprehensive utilities:
-1. **Movie Link Opener** - Batch opens movie detail pages with multi-site support
-2. **Tab Reloader** - Sequential tab refresh with pinned tab exclusion
-3. **Magnet Link Extractor** - Extracts, deduplicates, validates, and exports magnet links
-4. **History & Logging** - Task history tracking and real-time operation logs
-5. **Network Status** - Real-time network connectivity monitoring
+Utilities for a JavDB-centered workflow:
+
+1. **Movie Link Opener** — batch-open movie detail pages with site presets
+2. **Tab Reloader** — sequential refresh with optional pinned-tab exclusion
+3. **Magnet Link Extractor** — extract, prefer, dedupe, validate, and export magnets
+4. **History & Logging** — task history and persistent operation logs
+5. **Network Status** — `navigator.onLine` indicator
 
 ## Architecture
 
-### Module Structure
+ES modules throughout, including the service worker (`background.type = module`).
 
-The extension uses ES6 modules with a clear separation of concerns:
+- `popup.js` — boots UI modules
+- `movie-links.js` — opener UI, settings persistence, progress restore
+- `tab-reloader.js` — refresh UI and button states
+- `magnet-extractor.js` — in-popup script injection and export
+- `background.js` — long-running opener and refresh tasks
+- `constants.js` — `SITE_PRESETS`, message actions, storage keys, defaults
+- `url-utils.js` — normalize / resolve / dedup / empty-result messages
+- `magnet-utils.js` — validation, btih dedup, preferred-magnet selection
+- `history-store.js` — DOM-free history writes used by popup and background
+- `utils.js` — toast, theme, logs, history display, collapsibles, network
+- `permissions.js` — optional host permission requests
+- `delay-utils.js` — jittered delay helpers
 
-- **popup.js** - Entry point that initializes all modules and UI components
-- **movie-links.js** - Movie link opener with site presets and custom selectors
-- **tab-reloader.js** - Tab refresh with pinned tab exclusion option
-- **magnet-extractor.js** - Magnet extraction with deduplication, validation, and export
-- **utils.js** - Shared utilities:
-  - Theme toggle (dark/light mode)
-  - Toast notifications
-  - Tab count display
-  - **Logging system** (addLog, clearLogs)
-  - **History management** (saveHistory, loadHistory, clearHistory)
-  - **Collapsible panels** (initCollapsibles)
-  - **Network status detection** (initNetworkStatus)
-  - **Task queue management** (addToQueue, processQueue, clearQueue)
-- **background.js** - Service worker handling long-running tasks
+## Message Passing
 
-### Message Passing Architecture
+Movie opener: `openMovieLinks`, `cancelMovieTask`, `getMovieTaskStatus`, plus `movieProgress` / `movieComplete` / `movieError` / `movieTaskCancelled`.
 
-**Movie Link Opener:**
-- popup.js sends `openMovieLinks` message with config (url, batchSize, delaySeconds, isTopMode, **selector**, **baseUrl**)
-- background.js runs task in background, sends progress updates via `movieProgress`, `movieComplete`, `movieError`, `movieTaskCancelled`
-- Tasks continue running even after popup closes
-- Supports `cancelMovieTask` message to abort running tasks
+Tab reloader: `startRefreshing`, `stopRefreshing`, `getRefreshTaskStatus`, `refreshProgress`, `refreshComplete`.
 
-**Tab Reloader:**
-- popup.js sends `startRefreshing` / `stopRefreshing` to background.js
-- Includes `excludePinned` option to skip pinned tabs
-- background.js sends `refreshProgress` / `refreshComplete` back to popup
-- Uses `safeSendMessage()` helper to suppress "no listener" errors when popup closes
+Progress is also persisted under `movieTaskProgress` / `refreshTaskProgress`. The popup listens to `chrome.storage.onChanged` so restore still works if a message was missed.
 
-### Key Design Patterns
+History completion is written by `background.js` so a closed popup does not leave `RUNNING` entries.
 
-1. **Background Task Persistence**: Movie link opening runs entirely in background.js service worker, survives popup closure
-2. **CSP Compliance**: Uses `chrome.scripting.executeScript` instead of `fetch` + `DOMParser` to extract links from temporary tabs
-3. **Anti-Firewall Strategy**:
-   - Batched tab opening with configurable size (1-10 tabs per batch)
-   - Random jitter (±30%) on delays to mimic human behavior
-   - Temporary tab creation for link extraction, immediately closed after use
-   - 5-7 second delays between TOP mode pages
-   - Automatic duplicate link filtering
-4. **Multi-Site Support**: Configurable CSS selectors for different websites (JavDB, JavBus, JavLibrary, custom)
-5. **Sequential Tab Refresh**: background.js maintains state (`isRefreshing`, `refreshTimeoutId`) and recursively processes tabs
-6. **Theme Persistence**: Dark/light mode stored in `chrome.storage.sync` and applied via CSS class on document root
-7. **Promise-based Extraction**: magnet-extractor.js uses Promise.all to execute scripts across all tabs concurrently
-8. **Magnet Link Validation**: Validates `magnet:?xt=urn:btih:` format and deduplicates by btih hash
-9. **Collapsible UI Panels**: History and log sections use expandable/collapsible pattern
-10. **Network Status Monitoring**: Uses `navigator.onLine` and `online`/`offline` events
+## Task Persistence
 
-## Development Commands
+In-memory flags are mirrored to `chrome.storage.local`. On service-worker start, `recoverInterruptedTasks()` resumes an in-flight movie task from the last page and marks an in-flight refresh as failed (tab snapshot would be stale).
 
-### Testing the Extension
+`chrome.alarms` (`taskKeepAlive`, ~24s) is rescheduled while a movie or refresh task is running.
 
-```bash
-# Load extension in Chrome
-# 1. Navigate to chrome://extensions
-# 2. Enable "Developer mode"
-# 3. Click "Load unpacked" and select project root directory
-# 4. After code changes, click "Refresh" on the extension card
-```
+## Site Presets
 
-### File Watching
-
-No build process required - direct hot reload via Chrome's extension refresh.
-
-## Domain-Specific Logic
-
-### Site Presets (movie-links.js & background.js)
+Single source: `SITE_PRESETS` in `constants.js`.
 
 ```javascript
-const SITE_PRESETS = {
-  javdb: {
-    selector: '.movie-list.h.cols-4 a.box',
-    baseUrl: 'https://javdb.com'
-  },
-  javbus: {
-    selector: '.movie-box',
-    baseUrl: ''  // Inferred from page URL
-  },
-  javlibrary: {
-    selector: '.video a[href*="/v="]',
-    baseUrl: ''
-  },
-  'generic-list': {
-    selector: 'a[href]',
-    baseUrl: ''
-  },
-  custom: {
-    selector: '',  // User-provided
-    baseUrl: ''
-  }
-};
+{
+  javdb: { selector: '.movie-list.h.cols-4 a.box', baseUrl: 'https://javdb.com' },
+  javbus: { selector: '.movie-box', baseUrl: '' },
+  javlibrary: { selector: '.video a[href*="/v="]', baseUrl: '' },
+  'generic-list': { selector: 'a[href]', baseUrl: '' },
+  custom: { selector: '', baseUrl: '' }
+}
 ```
 
-### Link Extraction Process
-1. Creates temporary background tab with target URL
-2. Waits for page load (`status === 'complete'`)
-3. Injects script with **configurable selector** via `chrome.scripting.executeScript`
-4. Handles relative URLs by combining with baseUrl or inferring from page origin
-5. Closes temporary tab immediately after extraction
-6. 10-second timeout protection to prevent hanging
+## Link Extraction
 
-### Magnet Link Validation
-- Validates format: `/^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i`
-- Deduplicates by extracting and comparing btih hash
-- Reports statistics: valid, duplicate, invalid counts
+1. Create a temporary background tab
+2. Wait for `complete`, then poll the selector until links appear, the page is blocked, or the wait expires
+3. Detect Cloudflare / login / timeout and surface a specific message
+4. Resolve relative URLs via `resolveRelativeUrl`
+5. Close the temp tab (single-settle guard on timeout vs success)
 
-## Important Implementation Details
+## Anti-firewall defaults
 
-### Why use temporary tabs for link extraction?
-- Chrome extension CSP policy blocks `fetch()` + `DOMParser` in service workers
-- Solution: Create temporary tab → inject script → extract data → close tab
-- Ensures compliance while maintaining functionality
+- Batch size 2, delay 3s ±30%
+- TOP inter-page delay 5–7s random
+- Stop after 2 consecutive empty pages
+- Open detail tabs with `active: false`
+- Optional tab group named `Movie Links`
 
-### Anti-firewall mechanism defaults
-- Default batch size: 2 tabs
-- Default delay: 3 seconds with ±30% random jitter
-- TOP mode adds extra 5-7 second delay between pages
-- All tabs open with `active: false` to reduce browser load
+## Magnet Validation
 
-### Storage Usage
-- `chrome.storage.sync`: Theme preference (`isDarkTheme`)
-- `chrome.storage.local`: Task history (`taskHistory`, max 50 entries)
+- Format: `/^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i`
+- Dedup by lowercase btih
+- Preferred pick uses the largest parsed size in nearby row text
+- Also reads `data-clipboard-text`
 
-## Common Patterns
+## Storage
 
-### Adding a New Feature Module
+- `chrome.storage.sync`: `isDarkTheme`
+- `chrome.storage.local`: `taskHistory` (50), `persistentLogs` (200), `movieTaskProgress`, `refreshTaskProgress`, `movieSettings`
+
+## Permissions
+
+- Always: `tabs`, `tabGroups`, `scripting`, `storage`, `alarms`, `*://javdb.com/*`, `*://*.javdb.com/*`
+- Optional: `http(s)://*/*` requested when the user opens a non-JavDB origin or extracts from other tabs
+
+## Adding a Feature Module
 
 1. Create `feature-name.js` with `export function initFeatureName()`
-2. Import and call in popup.js `DOMContentLoaded` handler
-3. Add UI section to popup.html
-4. Use utilities from utils.js:
-   - `showToast(message)` for user feedback
-   - `addLog(message, level)` for logging (levels: info, success, warning, error)
-   - `saveHistory({ action, result })` for history tracking
+2. Import and call it from `popup.js`
+3. Add UI to `popup.html`
+4. Use `showToast`, `addLog`, and `createHistory` / `updateHistory` from `utils.js`
+5. Keep comments and identifiers in English; user-facing popup copy may stay Chinese
 
-### Adding a New Site Preset
+## Adding a Site Preset
 
-1. Add preset to `SITE_PRESETS` in movie-links.js
-2. Add corresponding option to `<select id="sitePreset">` in popup.html
-3. Preset will automatically work with background.js (it receives selector via message)
+Add the preset to `SITE_PRESETS` in `constants.js` and an `<option>` in `#sitePreset`.
 
-### Chrome Extension Permissions
+## Tests
 
-Current permissions in manifest.json:
-- `tabs`, `scripting`, `activeTab` - for tab manipulation and content script injection
-- `storage` - for theme and history persistence
-- `host_permissions` - broad HTTPS/HTTP access for fetch operations
-
-## UI Components
-
-### Collapsible Sections
-```html
-<div class="section collapsible">
-  <h2 class="section-header" id="toggleId">
-    <span>Title</span>
-    <span class="toggle-icon">▼</span>
-  </h2>
-  <div id="contentId" class="collapsible-content" style="display:none;">
-    <!-- Content -->
-  </div>
-</div>
+```bash
+node --test tests/
 ```
 
-### Button Variants
-- Primary: Default button style
-- Secondary: `.secondary-btn` class for less prominent actions
-- Cancel: `.cancel-btn` class for destructive/cancel actions
-
-### Network Status
-```html
-<div id="networkStatus" class="network-status online">
-  <span class="status-dot"></span>
-  <span class="status-text">网络正常</span>
-</div>
-```
+Pure helpers in `url-utils.js` and `magnet-utils.js` are the preferred unit-test targets.
