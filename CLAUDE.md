@@ -31,7 +31,7 @@ ES modules throughout, including the service worker (`background.type = module`)
 
 ## Message Passing
 
-Movie opener: `openMovieLinks`, `cancelMovieTask`, `getMovieTaskStatus`, plus `movieProgress` / `movieComplete` / `movieError` / `movieTaskCancelled`.
+Movie opener: `openMovieLinks` collects links, `moviePreview` asks for confirm, `confirmMovieOpen` starts opening, plus `cancelMovieTask`, `getMovieTaskStatus`, `movieProgress` / `movieComplete` / `movieError` / `movieTaskCancelled`.
 
 Tab reloader: `startRefreshing`, `stopRefreshing`, `getRefreshTaskStatus`, `refreshProgress`, `refreshComplete`.
 
@@ -79,13 +79,13 @@ Single source: `SITE_PRESETS` in `constants.js`.
 
 - Format: `/^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i`
 - Dedup by lowercase btih
-- Independent priorities: **优先字幕** and **优先无码** can be combined. Score 0–2 per magnet (subtitle +1, uncensored +1). First-only picks the highest score, then page order; if nothing matches, take the first magnet on the page. Extract-all sorts by score and keeps every link.
+- Independent priorities: **优先字幕** and **优先无码** can be combined. Score 0–2 per magnet (subtitle +1, uncensored +1). First-only picks the highest score, then page order; if nothing matches, take the first magnet on the page. Extract-all sorts by score and keeps every link. The result list shows tags and whether a first-link fallback was used.
 - Also reads `data-clipboard-text`
 
 ## Storage
 
 - `chrome.storage.sync`: `isDarkTheme`
-- `chrome.storage.local`: `taskHistory` (50), `persistentLogs` (200), `movieTaskProgress`, `refreshTaskProgress`, `movieSettings`, `magnetSettings` (`preferSubtitles`, `preferUncensored`)
+- `chrome.storage.local`: `taskHistory` (50), `persistentLogs` (200), `movieTaskProgress`, `refreshTaskProgress`, `movieSettings`, `magnetSettings`, `uiSettings`
 
 ## Permissions
 
