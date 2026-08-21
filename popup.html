@@ -3,18 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>超级链接与标签管理工具</title>
+  <title>链接与磁力</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <h1>超级链接与标签管理工具</h1>
-
-  <div class="theme-toggle">
-    <label for="themeToggle">暗色模式</label>
-    <input type="checkbox" id="themeToggle" />
-  </div>
-
-  <div id="tabCount"></div>
+  <header class="popup-header">
+    <h1>链接与磁力</h1>
+    <div id="tabCount"></div>
+  </header>
 
   <div class="section">
     <h2>电影链接打开器</h2>
@@ -62,6 +58,13 @@
     </label>
 
     <button id="openMovieLinks">打开电影链接</button>
+    <div id="moviePreview" class="preview-bar is-hidden">
+      <p id="moviePreviewText"></p>
+      <div class="button-row">
+        <button type="button" id="confirmMovieOpen">开始打开</button>
+        <button type="button" id="cancelMoviePreview" class="secondary-btn">取消</button>
+      </div>
+    </div>
     <button id="cancelMovieTask" class="cancel-btn is-hidden">取消任务</button>
     <div id="movieProgress" class="progress-text is-empty"></div>
     <div class="progress-bar-wrap is-hidden" id="movieProgressBar">
@@ -69,25 +72,30 @@
     </div>
   </div>
 
-  <div class="section">
-    <h2>标签页刷新器</h2>
-    <label class="sr-only" for="refreshInterval">刷新间隔（秒）</label>
-    <input type="number" id="refreshInterval" value="1" step="0.1" min="0.1" placeholder="刷新间隔（秒）">
-    <label class="checkbox-label" for="excludePinned">
-      <input type="checkbox" id="excludePinned"> 排除固定标签
-    </label>
-    <button id="startRefreshing">开始刷新</button>
-    <button id="stopRefreshing" disabled>停止刷新</button>
-    <div id="refreshProgress" class="progress-text"></div>
-    <div class="progress-bar-wrap is-hidden" id="refreshProgressBar">
-      <div class="progress-bar-fill"></div>
+  <div class="section collapsible" id="reloaderSection">
+    <h2 class="section-header" id="refreshToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="refreshContent">
+      <span>标签页刷新器</span>
+      <span class="toggle-icon" aria-hidden="true">▼</span>
+    </h2>
+    <div id="refreshContent" class="collapsible-content">
+      <label class="field-label" for="refreshInterval">
+        间隔（秒）
+        <input type="number" id="refreshInterval" value="1" step="0.1" min="0.1">
+      </label>
+      <label class="checkbox-label" for="excludePinned">
+        <input type="checkbox" id="excludePinned"> 排除固定标签
+      </label>
+      <button type="button" id="toggleRefreshing">开始刷新</button>
+      <div id="refreshProgress" class="progress-text is-empty"></div>
+      <div class="progress-bar-wrap is-hidden" id="refreshProgressBar">
+        <div class="progress-bar-fill"></div>
+      </div>
     </div>
   </div>
 
   <div class="section">
     <h2>磁力链接提取器</h2>
-    <button id="extractMagnetLinks">提取磁力链接（每页首选）</button>
-    <button id="extractAllMagnetLinks">提取所有磁力链接</button>
+    <p class="hint">未命中优先条件时仍取该页第一条，不会留空。</p>
     <div class="preference-row">
       <label class="checkbox-label" for="preferSubtitles">
         <input type="checkbox" id="preferSubtitles"> 优先字幕
@@ -96,12 +104,23 @@
         <input type="checkbox" id="preferUncensored"> 优先无码
       </label>
     </div>
-    <div class="button-row">
+    <div class="mode-row" role="radiogroup" aria-label="提取范围">
+      <label class="checkbox-label" for="extractModeFirst">
+        <input type="radio" name="extractMode" id="extractModeFirst" value="first" checked>
+        每页一条
+      </label>
+      <label class="checkbox-label" for="extractModeAll">
+        <input type="radio" name="extractMode" id="extractModeAll" value="all">
+        全部
+      </label>
+    </div>
+    <button id="extractMagnetLinks">提取磁力链接</button>
+    <div class="button-row is-hidden" id="magnetExportRow">
       <button id="copyMagnetLinks">复制磁力链接</button>
       <button id="exportMagnetLinks">导出 TXT</button>
       <button id="exportMagnetJson" class="secondary-btn">导出 JSON</button>
     </div>
-    <div id="resultContainer"></div>
+    <div id="resultContainer" class="is-hidden"></div>
   </div>
 
   <div class="section collapsible">
@@ -126,10 +145,16 @@
     </div>
   </div>
 
-  <div id="networkStatus" class="network-status online" role="status" aria-live="polite">
-    <span class="status-dot"></span>
-    <span class="status-text">网络正常</span>
-  </div>
+  <footer class="popup-footer">
+    <div class="theme-toggle">
+      <label for="themeToggle">暗色模式</label>
+      <input type="checkbox" id="themeToggle" />
+    </div>
+    <div id="networkStatus" class="network-status online is-hidden" role="status" aria-live="polite">
+      <span class="status-dot"></span>
+      <span class="status-text">网络离线</span>
+    </div>
+  </footer>
 
   <div id="toast" role="status" aria-live="polite"></div>
 
