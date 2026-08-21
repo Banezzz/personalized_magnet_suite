@@ -37,18 +37,31 @@ export function updateProgress(message, current, total) {
   }
 }
 
-function setMovieBusy(isBusy) {
+function setMoviePhase(phase) {
   const openBtn = getEl('openMovieLinks');
   const cancelBtn = getEl('cancelMovieTask');
-  if (openBtn) openBtn.disabled = isBusy;
-  if (cancelBtn) cancelBtn.style.display = isBusy ? 'block' : 'none';
+  const preview = getEl('moviePreview');
+  if (openBtn) openBtn.disabled = phase !== 'idle';
+  if (cancelBtn) cancelBtn.classList.toggle('is-hidden', phase !== 'busy');
+  if (preview) preview.classList.toggle('is-hidden', phase !== 'preview');
+}
+
+function showMoviePreview(message) {
+  const text = getEl('moviePreviewText');
+  if (text) text.textContent = message || '';
+  updateProgress(message || '');
+  setMoviePhase('preview');
 }
 
 function applyProgress(progress) {
   if (!progress || !progress.running) return;
-  updateProgress(progress.message || '任务进行中...', progress.current, progress.total);
-  setMovieBusy(true);
   if (progress.historyId) currentTaskHistoryId = progress.historyId;
+  if (progress.phase === 'preview') {
+    showMoviePreview(progress.message || '将打开详情，等待确认');
+    return;
+  }
+  updateProgress(progress.message || '任务进行中...', progress.current, progress.total);
+  setMoviePhase('busy');
 }
 
 async function saveMovieSettings() {
@@ -119,7 +132,7 @@ function restoreTaskProgress() {
       }
     } else if (response?.running) {
       updateProgress('任务进行中...');
-      setMovieBusy(true);
+      setMoviePhase('busy');
     }
   });
 }
@@ -169,16 +182,29 @@ export function initMovieLinks() {
     useCurrentBtn.addEventListener('click', fillCurrentTabUrl);
   }
 
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => {
-      chrome.runtime.sendMessage({ action: ACTIONS.cancelMovieTask }, (response) => {
-        if (response?.success) {
-          showToast('正在取消任务...');
-          addLog('用户请求取消任务', 'warning');
-        }
-      });
+  const requestCancel = () => {
+    chrome.runtime.sendMessage({ action: ACTIONS.cancelMovieTask }, (response) => {
+      if (response?.success) {
+        showToast('正在取消任务...');
+        addLog('用户请求取消任务', 'warning');
+      }
     });
+  };
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', requestCancel);
   }
+  getEl('cancelMoviePreview')?.addEventListener('click', requestCancel);
+  getEl('confirmMovieOpen')?.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ action: ACTIONS.confirmMovieOpen }, (response) => {
+      if (chrome.runtime.lastError || !response?.success) {
+        showToast(response?.message || '无法开始打开');
+        return;
+      }
+      setMoviePhase('busy');
+      updateProgress('开始打开...');
+    });
+  });
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === ACTIONS.movieProgress) {
@@ -187,12 +213,16 @@ export function initMovieLinks() {
         lastLoggedPage = message.currentPage;
         addLog(message.message || `第 ${message.currentPage} 页`, 'info');
       }
-      setMovieBusy(true);
+      setMoviePhase('busy');
+    } else if (message.action === ACTIONS.moviePreview) {
+      showMoviePreview(message.message);
+      showToast(message.message);
+      addLog(message.message || '已解析链接，等待确认', 'info');
     } else if (message.action === ACTIONS.movieComplete) {
       updateProgress(message.message || '完成！', 1, 1);
       showToast(message.message || '所有链接已打开');
       addLog(message.message || '任务完成', 'success');
-      setMovieBusy(false);
+      setMoviePhase('idle');
       currentTaskHistoryId = null;
       lastLoggedPage = null;
       setTimeout(() => updateProgress(''), 2000);
@@ -200,13 +230,13 @@ export function initMovieLinks() {
       updateProgress(message.message || '处理失败');
       showToast(message.message || '处理失败');
       addLog(message.message || '处理失败', 'error');
-      setMovieBusy(false);
+      setMoviePhase('idle');
       currentTaskHistoryId = null;
     } else if (message.action === ACTIONS.movieTaskCancelled) {
       updateProgress('');
       showToast('任务已取消');
       addLog('任务已取消', 'warning');
-      setMovieBusy(false);
+      setMoviePhase('idle');
       currentTaskHistoryId = null;
       lastLoggedPage = null;
     }
@@ -267,7 +297,7 @@ export function initMovieLinks() {
       if (chrome.runtime.lastError) {
         showToast('后台未响应，请重试');
         addLog(chrome.runtime.lastError.message, 'error');
-        setMovieBusy(false);
+        setMoviePhase('idle');
         if (currentTaskHistoryId) {
           updateHistory(currentTaskHistoryId, {
             status: TASK_STATUS.FAILED,
@@ -278,13 +308,13 @@ export function initMovieLinks() {
         return;
       }
       if (response?.success) {
-        showToast(isTopChecked ? '开始处理多页链接...' : '开始打开链接...');
-        updateProgress('任务已启动，可以关闭此窗口');
-        setMovieBusy(true);
+        showToast(isTopChecked ? '开始解析多页链接...' : '开始解析链接...');
+        updateProgress('正在解析，稍后确认打开数量');
+        setMoviePhase('busy');
       } else {
         showToast(response?.message || '任务启动失败');
         addLog(response?.message || '任务启动失败', 'error');
-        setMovieBusy(false);
+        setMoviePhase('idle');
         if (currentTaskHistoryId) {
           updateHistory(currentTaskHistoryId, {
             status: TASK_STATUS.FAILED,

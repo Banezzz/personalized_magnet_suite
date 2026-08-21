@@ -27,9 +27,11 @@ export const SITE_PRESETS = {
 
 export const ACTIONS = {
   openMovieLinks: 'openMovieLinks',
+  confirmMovieOpen: 'confirmMovieOpen',
   cancelMovieTask: 'cancelMovieTask',
   getMovieTaskStatus: 'getMovieTaskStatus',
   movieProgress: 'movieProgress',
+  moviePreview: 'moviePreview',
   movieComplete: 'movieComplete',
   movieError: 'movieError',
   movieTaskCancelled: 'movieTaskCancelled',
@@ -47,7 +49,8 @@ export const STORAGE_KEYS = {
   persistentLogs: 'persistentLogs',
   isDarkTheme: 'isDarkTheme',
   movieSettings: 'movieSettings',
-  magnetSettings: 'magnetSettings'
+  magnetSettings: 'magnetSettings',
+  uiSettings: 'uiSettings'
 };
 
 export const LIMITS = {

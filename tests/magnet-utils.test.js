@@ -4,10 +4,12 @@ import {
   decodeMagnetName,
   deduplicateAndValidate,
   extractBtih,
+  describeMagnetTags,
   flattenMagnetCandidates,
   hasChineseSubtitleLabel,
   hasUncensoredLabel,
   isValidMagnetLink,
+  magnetHref,
   magnetPriorityScore,
   parseSizeToBytes,
   selectPreferredMagnet
@@ -155,13 +157,23 @@ describe('selectPreferredMagnet', () => {
   });
 });
 
+describe('describeMagnetTags', () => {
+  it('labels subtitle and uncensored magnets', () => {
+    assert.deepEqual(describeMagnetTags({ href: MAGNET_C, sizeText: 'C 700MB' }), ['字幕']);
+    assert.deepEqual(describeMagnetTags({ href: MAGNET_U, sizeText: 'U 无码' }), ['无码']);
+    assert.deepEqual(describeMagnetTags({ href: MAGNET_UC, sizeText: 'UC 1GB' }), ['字幕', '无码']);
+    assert.deepEqual(describeMagnetTags({ href: MAGNET_A, sizeText: '普通' }), []);
+  });
+});
+
 describe('flattenMagnetCandidates', () => {
   it('returns the first listed magnet in first-only mode when both preferences are off', () => {
     const result = flattenMagnetCandidates([
       { href: MAGNET_A, sizeText: '1GB' },
       { href: MAGNET_B, sizeText: '8GB' }
     ], { firstOnly: true, preferSubtitles: false, preferUncensored: false });
-    assert.deepEqual(result, [MAGNET_A]);
+    assert.deepEqual(result.map(magnetHref), [MAGNET_A]);
+    assert.equal(result[0].usedFallback, false);
   });
 
   it('still returns one magnet when no priority label matches', () => {
@@ -169,7 +181,8 @@ describe('flattenMagnetCandidates', () => {
       { href: MAGNET_A, sizeText: '普通 1GB' },
       { href: MAGNET_B, sizeText: '普通 8GB' }
     ], { firstOnly: true, preferSubtitles: true, preferUncensored: true });
-    assert.deepEqual(result, [MAGNET_A]);
+    assert.deepEqual(result.map(magnetHref), [MAGNET_A]);
+    assert.equal(result[0].usedFallback, true);
   });
 
   it('keeps page order when both preferences are off', () => {
@@ -178,7 +191,7 @@ describe('flattenMagnetCandidates', () => {
       { href: MAGNET_UC, sizeText: 'UC 1GB' },
       { href: MAGNET_B, sizeText: '2GB' }
     ], { firstOnly: false, preferSubtitles: false, preferUncensored: false });
-    assert.deepEqual(result, [MAGNET_A, MAGNET_UC, MAGNET_B]);
+    assert.deepEqual(result.map(magnetHref), [MAGNET_A, MAGNET_UC, MAGNET_B]);
   });
 
   it('sorts extract-all by combined score then page order', () => {
@@ -188,7 +201,9 @@ describe('flattenMagnetCandidates', () => {
       { href: MAGNET_U, sizeText: 'U 无码' },
       { href: MAGNET_UC, sizeText: 'UC 1GB' }
     ], { firstOnly: false, preferSubtitles: true, preferUncensored: true });
-    assert.deepEqual(result, [MAGNET_UC, MAGNET_C, MAGNET_U, MAGNET_A]);
+    assert.deepEqual(result.map(magnetHref), [MAGNET_UC, MAGNET_C, MAGNET_U, MAGNET_A]);
+    assert.deepEqual(result[0].tags, ['字幕', '无码']);
+    assert.equal(result[0].usedFallback, false);
   });
 });
 

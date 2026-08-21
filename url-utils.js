@@ -100,3 +100,13 @@ export function describeExtractionFailure(diagnostic) {
   if (diagnostic.error === 'script_failed') return '页面脚本执行失败，可能缺少访问权限';
   return '未找到任何链接，请检查选择器或页面类型';
 }
+
+export function describeMoviePreview(newCount, skippedCount = 0) {
+  if (!newCount) {
+    return skippedCount > 0
+      ? `没有新的详情可打开，跳过 ${skippedCount} 个已打开`
+      : '没有新的详情可打开';
+  }
+  const base = `将打开 ${newCount} 个详情`;
+  return skippedCount > 0 ? `${base}，跳过 ${skippedCount} 个已打开` : base;
+}

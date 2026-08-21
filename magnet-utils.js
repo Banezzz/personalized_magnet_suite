@@ -105,7 +105,31 @@ export function magnetPriorityScore(item, { preferSubtitles = false, preferUncen
   return score;
 }
 
-export function selectPreferredMagnet(candidates, options = {}) {
+export function magnetHref(value) {
+  if (!value) return '';
+  return typeof value === 'string' ? value : (value.href || '');
+}
+
+export function describeMagnetTags(item) {
+  const label = typeof item === 'string' ? item : candidateLabelText(item);
+  const tags = [];
+  if (hasChineseSubtitleLabel(label)) tags.push('字幕');
+  if (hasUncensoredLabel(label)) tags.push('无码');
+  return tags;
+}
+
+export function toMagnetResult(item, { firstOnly = false, ...options } = {}) {
+  const prefsOn = !!(options.preferSubtitles || options.preferUncensored);
+  const score = magnetPriorityScore(item, options);
+  return {
+    href: item.href,
+    tags: describeMagnetTags(item),
+    score,
+    usedFallback: firstOnly && prefsOn && score === 0
+  };
+}
+
+export function selectPreferredMagnetItem(candidates, options = {}) {
   const valid = (candidates || []).filter((item) => item && isValidMagnetLink(item.href));
   if (valid.length === 0) return null;
 
@@ -118,20 +142,26 @@ export function selectPreferredMagnet(candidates, options = {}) {
       bestScore = score;
     }
   }
-  return best.href;
+  return best;
+}
+
+export function selectPreferredMagnet(candidates, options = {}) {
+  const best = selectPreferredMagnetItem(candidates, options);
+  return best ? best.href : null;
 }
 
 export function flattenMagnetCandidates(candidates, { firstOnly = false, ...options } = {}) {
   if (!candidates || candidates.length === 0) return [];
   const valid = candidates.filter((item) => item && isValidMagnetLink(item.href));
   if (valid.length === 0) return [];
+  const resultOptions = { firstOnly, ...options };
   if (firstOnly) {
-    const preferred = selectPreferredMagnet(valid, options);
-    return preferred ? [preferred] : [];
+    const preferred = selectPreferredMagnetItem(valid, options);
+    return preferred ? [toMagnetResult(preferred, resultOptions)] : [];
   }
   return [...valid]
     .sort((left, right) => magnetPriorityScore(right, options) - magnetPriorityScore(left, options))
-    .map((item) => item.href);
+    .map((item) => toMagnetResult(item, resultOptions));
 }
 
 export function deduplicateAndValidate(links) {
@@ -141,11 +171,12 @@ export function deduplicateAndValidate(links) {
   let duplicateCount = 0;
 
   for (const link of links) {
-    if (!isValidMagnetLink(link)) {
+    const href = magnetHref(link);
+    if (!isValidMagnetLink(href)) {
       invalidCount += 1;
       continue;
     }
-    const hash = extractBtih(link);
+    const hash = extractBtih(href);
     if (!hash) {
       invalidCount += 1;
       continue;

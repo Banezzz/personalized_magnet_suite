@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   describeExtractionFailure,
+  describeMoviePreview,
   filterDuplicateLinks,
   isHttpUrl,
   isRestrictedTabUrl,
@@ -95,5 +96,17 @@ describe('describeExtractionFailure', () => {
     assert.match(describeExtractionFailure({ login: true }), /登录/);
     assert.match(describeExtractionFailure({ error: 'timeout' }), /超时/);
     assert.match(describeExtractionFailure({}), /选择器/);
+  });
+});
+
+describe('describeMoviePreview', () => {
+  it('names how many new detail tabs will open', () => {
+    assert.equal(describeMoviePreview(24), '将打开 24 个详情');
+    assert.equal(describeMoviePreview(24, 3), '将打开 24 个详情，跳过 3 个已打开');
+  });
+
+  it('explains when every link is already open', () => {
+    assert.equal(describeMoviePreview(0, 5), '没有新的详情可打开，跳过 5 个已打开');
+    assert.equal(describeMoviePreview(0), '没有新的详情可打开');
   });
 });

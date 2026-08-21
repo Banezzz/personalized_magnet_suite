@@ -1,14 +1,13 @@
 import { STORAGE_KEYS } from './constants.js';
 import { showToast, addLog, saveHistory, createHistory, updateHistory, TASK_STATUS } from './utils.js';
-import { deduplicateAndValidate, flattenMagnetCandidates } from './magnet-utils.js';
+import { deduplicateAndValidate, flattenMagnetCandidates, magnetHref } from './magnet-utils.js';
 import { ensureOriginsForTabs } from './permissions.js';
 import { isRestrictedTabUrl } from './url-utils.js';
 
 let currentExtractHistoryId = null;
 
 export function initMagnetExtractor() {
-  const extractFirstBtn = document.getElementById('extractMagnetLinks');
-  const extractAllBtn = document.getElementById('extractAllMagnetLinks');
+  const extractBtn = document.getElementById('extractMagnetLinks');
   const copyBtn = document.getElementById('copyMagnetLinks');
   const exportBtn = document.getElementById('exportMagnetLinks');
   const exportJsonBtn = document.getElementById('exportMagnetJson');
@@ -16,12 +15,11 @@ export function initMagnetExtractor() {
   restoreMagnetSettings();
   document.getElementById('preferSubtitles')?.addEventListener('change', saveMagnetSettings);
   document.getElementById('preferUncensored')?.addEventListener('change', saveMagnetSettings);
+  document.getElementById('extractModeFirst')?.addEventListener('change', saveMagnetSettings);
+  document.getElementById('extractModeAll')?.addEventListener('change', saveMagnetSettings);
 
-  if (extractAllBtn) {
-    extractAllBtn.addEventListener('click', () => extractLinks({ firstOnly: false }));
-  }
-  if (extractFirstBtn) {
-    extractFirstBtn.addEventListener('click', () => extractLinks({ firstOnly: true }));
+  if (extractBtn) {
+    extractBtn.addEventListener('click', () => extractLinks({ firstOnly: isFirstOnlyMode() }));
   }
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
@@ -61,10 +59,15 @@ export function initMagnetExtractor() {
   }
 }
 
+function isFirstOnlyMode() {
+  return document.getElementById('extractModeAll')?.checked !== true;
+}
+
 function preferenceOptions() {
   return {
     preferSubtitles: !!document.getElementById('preferSubtitles')?.checked,
-    preferUncensored: !!document.getElementById('preferUncensored')?.checked
+    preferUncensored: !!document.getElementById('preferUncensored')?.checked,
+    firstOnly: isFirstOnlyMode()
   };
 }
 
@@ -92,11 +95,17 @@ async function restoreMagnetSettings() {
   if (uncensoredBox && typeof settings.preferUncensored === 'boolean') {
     uncensoredBox.checked = settings.preferUncensored;
   }
+  const firstRadio = document.getElementById('extractModeFirst');
+  const allRadio = document.getElementById('extractModeAll');
+  if (firstRadio && allRadio && typeof settings.firstOnly === 'boolean') {
+    firstRadio.checked = settings.firstOnly;
+    allRadio.checked = !settings.firstOnly;
+  }
 }
 
 function getExtractedLinks() {
   const container = document.getElementById('resultContainer');
-  return Array.from(container.querySelectorAll('.magnet-link')).map((div) => div.textContent);
+  return Array.from(container.querySelectorAll('.magnet-item')).map((item) => item.dataset.href);
 }
 
 function exportToFile(content, extension, mime) {
@@ -154,23 +163,18 @@ function executeOnTab(tabId) {
 }
 
 function setExtractBusy(isBusy) {
-  const extractFirstBtn = document.getElementById('extractMagnetLinks');
-  const extractAllBtn = document.getElementById('extractAllMagnetLinks');
-  if (extractFirstBtn) extractFirstBtn.disabled = isBusy;
-  if (extractAllBtn) extractAllBtn.disabled = isBusy;
+  const extractBtn = document.getElementById('extractMagnetLinks');
+  if (extractBtn) extractBtn.disabled = isBusy;
 }
 
 function setExportVisible(visible) {
-  ['copyMagnetLinks', 'exportMagnetLinks', 'exportMagnetJson'].forEach((id) => {
-    const button = document.getElementById(id);
-    if (button) button.style.display = visible ? 'block' : 'none';
-  });
+  document.getElementById('magnetExportRow')?.classList.toggle('is-hidden', !visible);
 }
 
 async function extractLinks({ firstOnly }) {
   setExtractBusy(true);
   const prefs = preferenceOptions();
-  const modeLabel = firstOnly ? '每页首选' : '全部';
+    const modeLabel = firstOnly ? '每页一条' : '全部';
   const filterLabel = preferenceLogLabel(prefs);
   addLog(`开始提取磁力链接 (${modeLabel}${filterLabel})`, 'info');
 
@@ -196,7 +200,7 @@ async function extractLinks({ firstOnly }) {
         perTab.push({ tabUrl: tab.url, magnets: [], error: result.error });
         return;
       }
-      const magnets = flattenMagnetCandidates(result.items, { firstOnly, ...prefs });
+      const magnets = flattenMagnetCandidates(result.items, prefs);
       if (magnets.length === 0) {
         tabsEmpty += 1;
       } else {
@@ -226,9 +230,11 @@ async function extractLinks({ firstOnly }) {
     window.__lastMagnetExport = {
       generatedAt: new Date().toISOString(),
       firstOnly,
-      ...prefs,
+      preferSubtitles: prefs.preferSubtitles,
+      preferUncensored: prefs.preferUncensored,
       stats,
-      links: validLinks,
+      links: validLinks.map(magnetHref),
+      results: validLinks,
       tabs: perTab
     };
 
@@ -249,7 +255,11 @@ async function extractLinks({ firstOnly }) {
 
 function displayResults(validLinks, stats) {
   const container = document.getElementById('resultContainer');
+  container.classList.remove('is-hidden');
   container.replaceChildren();
+
+  const preferredCount = validLinks.filter((item) => (item.score || 0) > 0).length;
+  const fallbackCount = validLinks.filter((item) => item.usedFallback).length;
 
   const summary = document.createElement('div');
   summary.className = 'result-summary';
@@ -262,6 +272,8 @@ function displayResults(validLinks, stats) {
     `原始链接: ${stats.rawCount}`,
     `有效链接: ${stats.validCount}`
   ];
+  if (preferredCount > 0) lines.push(`命中优先: ${preferredCount}`);
+  if (fallbackCount > 0) lines.push(`未命中已回退: ${fallbackCount}`);
   if (stats.duplicateCount > 0) lines.push(`去除重复: ${stats.duplicateCount}`);
   if (stats.invalidCount > 0) lines.push(`无效格式: ${stats.invalidCount}`);
 
@@ -282,21 +294,45 @@ function displayResults(validLinks, stats) {
     const linkList = document.createElement('div');
     linkList.className = 'link-list';
     const fragment = document.createDocumentFragment();
-    validLinks.forEach((link, index) => {
-      const div = document.createElement('div');
-      div.className = 'magnet-link';
-      div.textContent = link;
-      div.title = `${index + 1}. 点击复制`;
-      fragment.appendChild(div);
+    validLinks.forEach((item, index) => {
+      const href = magnetHref(item);
+      const card = document.createElement('div');
+      card.className = 'magnet-item';
+      card.dataset.href = href;
+      card.title = `${index + 1}. 点击复制`;
+
+      const meta = document.createElement('div');
+      meta.className = 'magnet-meta';
+      (item.tags || []).forEach((tag) => {
+        const badge = document.createElement('span');
+        badge.className = tag === '无码' ? 'magnet-tag uncensored' : 'magnet-tag';
+        badge.textContent = tag;
+        meta.appendChild(badge);
+      });
+      if (item.usedFallback) {
+        const fallback = document.createElement('span');
+        fallback.className = 'magnet-fallback';
+        fallback.textContent = '未命中优先，已取第一条';
+        meta.appendChild(fallback);
+      }
+      if (meta.childNodes.length > 0) {
+        card.appendChild(meta);
+      }
+
+      const link = document.createElement('div');
+      link.className = 'magnet-link';
+      link.textContent = href;
+      card.appendChild(link);
+      fragment.appendChild(card);
     });
     linkList.appendChild(fragment);
     linkList.addEventListener('click', (event) => {
-      const magnetDiv = event.target.closest('.magnet-link');
-      if (!magnetDiv) return;
-      navigator.clipboard.writeText(magnetDiv.textContent).then(() => {
+      const card = event.target.closest('.magnet-item');
+      if (!card?.dataset.href) return;
+      navigator.clipboard.writeText(card.dataset.href).then(() => {
         showToast('链接已复制');
-        magnetDiv.classList.add('copied');
-        setTimeout(() => magnetDiv.classList.remove('copied'), 600);
+        card.classList.add('copied');
+        setTimeout(() => card.classList.remove('copied'), 600);
       });
     });
     container.appendChild(linkList);
@@ -304,7 +340,7 @@ function displayResults(validLinks, stats) {
   }
 
   const noResult = document.createElement('div');
-  noResult.textContent = '未找到有效的磁力链接';
+  noResult.textContent = '未找到有效的磁力链接。请先打开影片详情页再提取。';
   noResult.className = 'empty-result';
   container.appendChild(noResult);
 }
