@@ -2,6 +2,8 @@
  * Magnet-link validation, size parsing, and deduplication. No Chrome APIs.
  */
 
+import { SUBTITLE_MAGNET_PHRASES, SUBTITLE_MAGNET_TAGS } from './constants.js';
+
 export const MAGNET_PREFIX_RE = /^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i;
 export const BTIH_RE = /btih:([a-zA-Z0-9]{32,40})/i;
 export const SIZE_RE = /(\d+(?:\.\d+)?)\s*(tib|tb|gib|gb|mib|mb|kib|kb|b)\b/i;
@@ -37,29 +39,84 @@ export function parseSizeToBytes(text) {
   return amount * (SIZE_MULTIPLIERS[unit] || 0);
 }
 
-export function selectPreferredMagnet(candidates) {
-  const valid = (candidates || []).filter((item) => item && isValidMagnetLink(item.href));
-  if (valid.length === 0) return null;
+export function decodeMagnetName(href) {
+  if (!href || typeof href !== 'string') return '';
+  const queryIndex = href.indexOf('?');
+  if (queryIndex === -1) return '';
+  try {
+    const params = new URLSearchParams(href.slice(queryIndex + 1));
+    return decodeURIComponent(params.get('dn') || '');
+  } catch {
+    return '';
+  }
+}
 
-  let best = valid[0];
+export function candidateLabelText(item) {
+  const href = item?.href || '';
+  return [item?.sizeText || '', href, decodeMagnetName(href)].join('\n');
+}
+
+function hasStandaloneTag(text, tag) {
+  const pattern = new RegExp(`(?<![A-Za-z])${tag}(?![A-Za-z])`, 'i');
+  return pattern.test(text);
+}
+
+/**
+ * True when the magnet is marked as having Chinese subtitles:
+ * C, UC, 中文字幕, 中英字幕, or 中英文件.
+ * U and 无码破解 mean uncensored without subtitles, so they do not match.
+ */
+export function hasChineseSubtitleLabel(text) {
+  const source = String(text || '');
+  if (!source) return false;
+  const lower = source.toLowerCase();
+  for (const phrase of SUBTITLE_MAGNET_PHRASES) {
+    if (lower.includes(phrase.toLowerCase())) return true;
+  }
+  for (const tag of SUBTITLE_MAGNET_TAGS) {
+    if (hasStandaloneTag(source, tag)) return true;
+  }
+  return false;
+}
+
+function selectLargestMagnet(candidates) {
+  let best = candidates[0];
   let bestSize = parseSizeToBytes(best.sizeText);
-  for (let i = 1; i < valid.length; i++) {
-    const size = parseSizeToBytes(valid[i].sizeText);
+  for (let i = 1; i < candidates.length; i++) {
+    const size = parseSizeToBytes(candidates[i].sizeText);
     if (size > bestSize) {
-      best = valid[i];
+      best = candidates[i];
       bestSize = size;
     }
   }
   return best.href;
 }
 
-export function flattenMagnetCandidates(candidates, firstOnly) {
+export function selectPreferredMagnet(candidates, { preferSubtitles = false } = {}) {
+  const valid = (candidates || []).filter((item) => item && isValidMagnetLink(item.href));
+  if (valid.length === 0) return null;
+
+  if (preferSubtitles) {
+    const withSubs = valid.filter((item) => hasChineseSubtitleLabel(candidateLabelText(item)));
+    if (withSubs.length > 0) return withSubs[0].href;
+  }
+  return selectLargestMagnet(valid);
+}
+
+export function flattenMagnetCandidates(candidates, { firstOnly = false, preferSubtitles = false } = {}) {
   if (!candidates || candidates.length === 0) return [];
+  const valid = candidates.filter((item) => item && isValidMagnetLink(item.href));
+  if (valid.length === 0) return [];
   if (firstOnly) {
-    const preferred = selectPreferredMagnet(candidates);
+    const preferred = selectPreferredMagnet(valid, { preferSubtitles });
     return preferred ? [preferred] : [];
   }
-  return candidates.map((item) => item.href).filter((href) => isValidMagnetLink(href));
+  if (!preferSubtitles) {
+    return valid.map((item) => item.href);
+  }
+  const withSubs = valid.filter((item) => hasChineseSubtitleLabel(candidateLabelText(item)));
+  const others = valid.filter((item) => !hasChineseSubtitleLabel(candidateLabelText(item)));
+  return [...withSubs, ...others].map((item) => item.href);
 }
 
 export function deduplicateAndValidate(links) {

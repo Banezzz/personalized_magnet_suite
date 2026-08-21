@@ -1,3 +1,4 @@
+import { STORAGE_KEYS } from './constants.js';
 import { showToast, addLog, saveHistory, createHistory, updateHistory, TASK_STATUS } from './utils.js';
 import { deduplicateAndValidate, flattenMagnetCandidates } from './magnet-utils.js';
 import { ensureOriginsForTabs } from './permissions.js';
@@ -11,6 +12,9 @@ export function initMagnetExtractor() {
   const copyBtn = document.getElementById('copyMagnetLinks');
   const exportBtn = document.getElementById('exportMagnetLinks');
   const exportJsonBtn = document.getElementById('exportMagnetJson');
+
+  restoreMagnetSettings();
+  document.getElementById('preferSubtitles')?.addEventListener('change', saveMagnetSettings);
 
   if (extractAllBtn) {
     extractAllBtn.addEventListener('click', () => extractLinks({ firstOnly: false }));
@@ -53,6 +57,26 @@ export function initMagnetExtractor() {
       }
       exportToFile(JSON.stringify(payload, null, 2), 'json', 'application/json');
     });
+  }
+}
+
+function preferSubtitlesEnabled() {
+  return !!document.getElementById('preferSubtitles')?.checked;
+}
+
+async function saveMagnetSettings() {
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.magnetSettings]: { preferSubtitles: preferSubtitlesEnabled() }
+  });
+}
+
+async function restoreMagnetSettings() {
+  const checkbox = document.getElementById('preferSubtitles');
+  if (!checkbox) return;
+  const data = await chrome.storage.local.get([STORAGE_KEYS.magnetSettings]);
+  const settings = data[STORAGE_KEYS.magnetSettings];
+  if (typeof settings?.preferSubtitles === 'boolean') {
+    checkbox.checked = settings.preferSubtitles;
   }
 }
 
@@ -131,11 +155,14 @@ function setExportVisible(visible) {
 
 async function extractLinks({ firstOnly }) {
   setExtractBusy(true);
-  addLog(`开始提取磁力链接 (${firstOnly ? '每页首选' : '全部'})`, 'info');
+  const preferSubtitles = preferSubtitlesEnabled();
+  const modeLabel = firstOnly ? '每页首选' : '全部';
+  const filterLabel = preferSubtitles ? '，优先有字幕' : '';
+  addLog(`开始提取磁力链接 (${modeLabel}${filterLabel})`, 'info');
 
   currentExtractHistoryId = await createHistory({
     action: '磁力链接提取',
-    result: `正在提取 (${firstOnly ? '每页首选' : '全部'})...`
+    result: `正在提取 (${modeLabel}${filterLabel})...`
   });
 
   chrome.tabs.query({ currentWindow: true }, async (tabs) => {
@@ -155,7 +182,7 @@ async function extractLinks({ firstOnly }) {
         perTab.push({ tabUrl: tab.url, magnets: [], error: result.error });
         return;
       }
-      const magnets = flattenMagnetCandidates(result.items, firstOnly);
+      const magnets = flattenMagnetCandidates(result.items, { firstOnly, preferSubtitles });
       if (magnets.length === 0) {
         tabsEmpty += 1;
       } else {
@@ -185,6 +212,7 @@ async function extractLinks({ firstOnly }) {
     window.__lastMagnetExport = {
       generatedAt: new Date().toISOString(),
       firstOnly,
+      preferSubtitles,
       stats,
       links: validLinks,
       tabs: perTab
