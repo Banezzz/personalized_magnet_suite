@@ -11,6 +11,7 @@
     "alarms"
   ],
   "host_permissions": [
+    "*://javdb.com/*",
     "*://*.javdb.com/*"
   ],
   "optional_host_permissions": [
