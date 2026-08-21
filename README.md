@@ -29,7 +29,7 @@ Sequentially reloads tabs in the current window.
 ### 3. Magnet Link Extractor
 Scans the current window for magnet links.
 
-- First-preferred or all-links mode, with an optional “优先提取有字幕的” checkbox (C / UC / 中文字幕; U and 无码破解 are uncensored without subs)
+- First-preferred or all-links mode, with an optional “优先提取有字幕的” checkbox. This is priority, not a filter: C / UC / 中文字幕 / U / 无码 / uncensored win when present, otherwise the first magnet on the page is used.
 - Reads `a[href^="magnet:"]` and `data-clipboard-text`
 - Dedup by btih hash and format validation
 - Per-tab stats: has magnets / empty / failed

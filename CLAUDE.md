@@ -79,7 +79,7 @@ Single source: `SITE_PRESETS` in `constants.js`.
 
 - Format: `/^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i`
 - Dedup by lowercase btih
-- Optional “prefer subtitles” checkbox: first magnet tagged C, UC, 中文字幕, or 中英字幕/文件. U and 无码破解 mean uncensored without subtitles and are skipped. Off = largest listed size
+- Optional “prefer subtitles” checkbox is a priority, not a filter: first magnet tagged C, UC, 中文字幕, 中英字幕/文件, U, 无码, or uncensored. If none match, take the first magnet on the page so a page without those labels still yields a link.
 - Also reads `data-clipboard-text`
 
 ## Storage
