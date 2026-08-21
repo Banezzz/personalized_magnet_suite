@@ -1,27 +1,32 @@
 {
-    "manifest_version": 3,
-    "name": "超级链接与标签管理工具",
-    "version": "1.0",
-    "description": "一个综合工具，用于管理链接、刷新标签页和提取磁力链接。",
-    "permissions": [
-      "tabs",
-      "scripting",
-      "activeTab",
-      "storage"
-    ],
-    "host_permissions": [
-      "https://*/*",
-      "http://*/*"
-    ],
-    "background": {
-      "service_worker": "background.js"
-    },
-    "action": {
-      "default_popup": "popup.html",
-      "default_icon": {
-        "16": "icon.png",
-        "48": "icon.png",
-        "128": "icon.png"
-      }
+  "manifest_version": 3,
+  "name": "超级链接与标签管理工具",
+  "version": "1.1.0",
+  "description": "批量打开影片详情页、刷新标签，并从页面提取磁力链接。",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "scripting",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://*.javdb.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
     }
   }
+}
