@@ -226,12 +226,21 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 export function initCollapsibles() {
-  function setupToggle(toggleEl, onExpand) {
+  function persistUiSetting(partial) {
+    chrome.storage.local.get([STORAGE_KEYS.uiSettings], (data) => {
+      chrome.storage.local.set({
+        [STORAGE_KEYS.uiSettings]: { ...(data[STORAGE_KEYS.uiSettings] || {}), ...partial }
+      });
+    });
+  }
+
+  function setupToggle(toggleEl, { onExpand, persistKey } = {}) {
     if (!toggleEl) return;
     const handler = () => {
       const section = toggleEl.closest('.collapsible');
       const isExpanded = section.classList.toggle('expanded');
       toggleEl.setAttribute('aria-expanded', isExpanded);
+      if (persistKey) persistUiSetting({ [persistKey]: isExpanded });
       if (isExpanded && onExpand) onExpand();
     };
     toggleEl.addEventListener('click', handler);
@@ -243,8 +252,18 @@ export function initCollapsibles() {
     });
   }
 
-  setupToggle(document.getElementById('historyToggle'), loadHistory);
+  setupToggle(document.getElementById('historyToggle'), { onExpand: loadHistory });
   setupToggle(document.getElementById('logToggle'));
+  setupToggle(document.getElementById('refreshToggle'), { persistKey: 'reloaderExpanded' });
+
+  chrome.storage.local.get([STORAGE_KEYS.uiSettings], (data) => {
+    if (!data[STORAGE_KEYS.uiSettings]?.reloaderExpanded) return;
+    const section = document.getElementById('reloaderSection');
+    const toggleEl = document.getElementById('refreshToggle');
+    if (!section || !toggleEl) return;
+    section.classList.add('expanded');
+    toggleEl.setAttribute('aria-expanded', 'true');
+  });
 
   const clearHistoryBtn = document.getElementById('clearHistory');
   if (clearHistoryBtn) {
@@ -270,6 +289,7 @@ export function initNetworkStatus() {
     const text = statusEl.querySelector('.status-text');
     statusEl.classList.toggle('offline', !isOnline);
     statusEl.classList.toggle('online', isOnline);
+    statusEl.classList.toggle('is-hidden', isOnline);
     text.textContent = isOnline ? '网络正常' : '网络离线';
   };
 
