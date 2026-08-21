@@ -220,6 +220,11 @@ export async function clearHistory() {
   showToast('历史记录已清空');
 }
 
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[STORAGE_KEYS.taskHistory]) return;
+  displayHistory(changes[STORAGE_KEYS.taskHistory].newValue || []);
+});
+
 export function initCollapsibles() {
   function setupToggle(toggleEl, onExpand) {
     if (!toggleEl) return;
