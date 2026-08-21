@@ -97,37 +97,41 @@ export function hasUncensoredLabel(text) {
   return false;
 }
 
-export function isPriorityMagnet(item, { preferSubtitles = false } = {}) {
-  if (!preferSubtitles) return false;
+export function magnetPriorityScore(item, { preferSubtitles = false, preferUncensored = false } = {}) {
   const label = candidateLabelText(item);
-  return hasChineseSubtitleLabel(label) || hasUncensoredLabel(label);
+  let score = 0;
+  if (preferSubtitles && hasChineseSubtitleLabel(label)) score += 1;
+  if (preferUncensored && hasUncensoredLabel(label)) score += 1;
+  return score;
 }
 
-export function selectPreferredMagnet(candidates, { preferSubtitles = false } = {}) {
+export function selectPreferredMagnet(candidates, options = {}) {
   const valid = (candidates || []).filter((item) => item && isValidMagnetLink(item.href));
   if (valid.length === 0) return null;
 
-  if (preferSubtitles) {
-    const prioritized = valid.find((item) => isPriorityMagnet(item, { preferSubtitles }));
-    if (prioritized) return prioritized.href;
+  let best = valid[0];
+  let bestScore = magnetPriorityScore(best, options);
+  for (let i = 1; i < valid.length; i++) {
+    const score = magnetPriorityScore(valid[i], options);
+    if (score > bestScore) {
+      best = valid[i];
+      bestScore = score;
+    }
   }
-  return valid[0].href;
+  return best.href;
 }
 
-export function flattenMagnetCandidates(candidates, { firstOnly = false, preferSubtitles = false } = {}) {
+export function flattenMagnetCandidates(candidates, { firstOnly = false, ...options } = {}) {
   if (!candidates || candidates.length === 0) return [];
   const valid = candidates.filter((item) => item && isValidMagnetLink(item.href));
   if (valid.length === 0) return [];
   if (firstOnly) {
-    const preferred = selectPreferredMagnet(valid, { preferSubtitles });
+    const preferred = selectPreferredMagnet(valid, options);
     return preferred ? [preferred] : [];
   }
-  if (!preferSubtitles) {
-    return valid.map((item) => item.href);
-  }
-  const prioritized = valid.filter((item) => isPriorityMagnet(item, { preferSubtitles }));
-  const others = valid.filter((item) => !isPriorityMagnet(item, { preferSubtitles }));
-  return [...prioritized, ...others].map((item) => item.href);
+  return [...valid]
+    .sort((left, right) => magnetPriorityScore(right, options) - magnetPriorityScore(left, options))
+    .map((item) => item.href);
 }
 
 export function deduplicateAndValidate(links) {
