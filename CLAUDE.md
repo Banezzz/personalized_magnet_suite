@@ -79,7 +79,7 @@ Single source: `SITE_PRESETS` in `constants.js`.
 
 - Format: `/^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i`
 - Dedup by lowercase btih
-- Preferred pick uses the largest parsed size in nearby row text
+- Optional “prefer subtitles” checkbox: first magnet tagged C, UC, 中文字幕, or 中英字幕/文件. U and 无码破解 mean uncensored without subtitles and are skipped. Off = largest listed size
 - Also reads `data-clipboard-text`
 
 ## Storage
