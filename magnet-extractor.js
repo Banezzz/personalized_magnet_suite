@@ -157,7 +157,7 @@ async function extractLinks({ firstOnly }) {
   setExtractBusy(true);
   const preferSubtitles = preferSubtitlesEnabled();
   const modeLabel = firstOnly ? '每页首选' : '全部';
-  const filterLabel = preferSubtitles ? '，优先有字幕' : '';
+  const filterLabel = preferSubtitles ? '，优先字幕/无码' : '';
   addLog(`开始提取磁力链接 (${modeLabel}${filterLabel})`, 'info');
 
   currentExtractHistoryId = await createHistory({
