@@ -15,6 +15,7 @@ export function initMagnetExtractor() {
 
   restoreMagnetSettings();
   document.getElementById('preferSubtitles')?.addEventListener('change', saveMagnetSettings);
+  document.getElementById('preferUncensored')?.addEventListener('change', saveMagnetSettings);
 
   if (extractAllBtn) {
     extractAllBtn.addEventListener('click', () => extractLinks({ firstOnly: false }));
@@ -60,23 +61,36 @@ export function initMagnetExtractor() {
   }
 }
 
-function preferSubtitlesEnabled() {
-  return !!document.getElementById('preferSubtitles')?.checked;
+function preferenceOptions() {
+  return {
+    preferSubtitles: !!document.getElementById('preferSubtitles')?.checked,
+    preferUncensored: !!document.getElementById('preferUncensored')?.checked
+  };
+}
+
+function preferenceLogLabel({ preferSubtitles, preferUncensored }) {
+  if (preferSubtitles && preferUncensored) return '，优先字幕+无码';
+  if (preferSubtitles) return '，优先字幕';
+  if (preferUncensored) return '，优先无码';
+  return '';
 }
 
 async function saveMagnetSettings() {
   await chrome.storage.local.set({
-    [STORAGE_KEYS.magnetSettings]: { preferSubtitles: preferSubtitlesEnabled() }
+    [STORAGE_KEYS.magnetSettings]: preferenceOptions()
   });
 }
 
 async function restoreMagnetSettings() {
-  const checkbox = document.getElementById('preferSubtitles');
-  if (!checkbox) return;
   const data = await chrome.storage.local.get([STORAGE_KEYS.magnetSettings]);
-  const settings = data[STORAGE_KEYS.magnetSettings];
-  if (typeof settings?.preferSubtitles === 'boolean') {
-    checkbox.checked = settings.preferSubtitles;
+  const settings = data[STORAGE_KEYS.magnetSettings] || {};
+  const subtitleBox = document.getElementById('preferSubtitles');
+  const uncensoredBox = document.getElementById('preferUncensored');
+  if (subtitleBox && typeof settings.preferSubtitles === 'boolean') {
+    subtitleBox.checked = settings.preferSubtitles;
+  }
+  if (uncensoredBox && typeof settings.preferUncensored === 'boolean') {
+    uncensoredBox.checked = settings.preferUncensored;
   }
 }
 
@@ -155,9 +169,9 @@ function setExportVisible(visible) {
 
 async function extractLinks({ firstOnly }) {
   setExtractBusy(true);
-  const preferSubtitles = preferSubtitlesEnabled();
+  const prefs = preferenceOptions();
   const modeLabel = firstOnly ? '每页首选' : '全部';
-  const filterLabel = preferSubtitles ? '，优先字幕/无码' : '';
+  const filterLabel = preferenceLogLabel(prefs);
   addLog(`开始提取磁力链接 (${modeLabel}${filterLabel})`, 'info');
 
   currentExtractHistoryId = await createHistory({
@@ -182,7 +196,7 @@ async function extractLinks({ firstOnly }) {
         perTab.push({ tabUrl: tab.url, magnets: [], error: result.error });
         return;
       }
-      const magnets = flattenMagnetCandidates(result.items, { firstOnly, preferSubtitles });
+      const magnets = flattenMagnetCandidates(result.items, { firstOnly, ...prefs });
       if (magnets.length === 0) {
         tabsEmpty += 1;
       } else {
@@ -212,7 +226,7 @@ async function extractLinks({ firstOnly }) {
     window.__lastMagnetExport = {
       generatedAt: new Date().toISOString(),
       firstOnly,
-      preferSubtitles,
+      ...prefs,
       stats,
       links: validLinks,
       tabs: perTab
