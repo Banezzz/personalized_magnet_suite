@@ -7,7 +7,7 @@ Guidance for working in this Manifest v3 Chrome extension.
 Utilities for a JavDB-centered workflow:
 
 1. **Movie Link Opener** — batch-open movie detail pages with site presets
-2. **Tab Reloader** — sequential refresh with optional pinned-tab exclusion
+2. **Tab Reloader** — sequential refresh with compound filters (pinned / no-magnet / tab group)
 3. **Magnet Link Extractor** — extract, prefer, dedupe, validate, and export magnets
 4. **History & Logging** — task history and persistent operation logs
 5. **Network Status** — `navigator.onLine` indicator
@@ -25,6 +25,7 @@ ES modules throughout, including the service worker (`background.type = module`)
 - `url-utils.js` — normalize / resolve / dedup / empty-result messages
 - `magnet-utils.js` — validation, btih dedup, preferred-magnet selection
 - `history-store.js` — DOM-free history writes used by popup and background
+- `refresh-filters.js` — compound tab-reloader filters (pinned / group / no-magnet)
 - `utils.js` — toast, theme, logs, history display, collapsibles, network
 - `permissions.js` — optional host permission requests
 - `delay-utils.js` — jittered delay helpers
@@ -33,7 +34,7 @@ ES modules throughout, including the service worker (`background.type = module`)
 
 Movie opener: `openMovieLinks` collects links, `moviePreview` asks for confirm, `confirmMovieOpen` starts opening, plus `cancelMovieTask`, `getMovieTaskStatus`, `movieProgress` / `movieComplete` / `movieError` / `movieTaskCancelled`.
 
-Tab reloader: `startRefreshing`, `stopRefreshing`, `getRefreshTaskStatus`, `refreshProgress`, `refreshComplete`.
+Tab reloader: `startRefreshing`, `stopRefreshing`, `getRefreshTaskStatus`, `refreshProgress`, `refreshComplete`. Refresh filters (`excludePinned`, `onlyInGroup`, `onlyNoMagnet`) are compound AND conditions.
 
 Progress is also persisted under `movieTaskProgress` / `refreshTaskProgress`. The popup listens to `chrome.storage.onChanged` so restore still works if a message was missed.
 
@@ -85,7 +86,7 @@ Single source: `SITE_PRESETS` in `constants.js`.
 ## Storage
 
 - `chrome.storage.sync`: `isDarkTheme`
-- `chrome.storage.local`: `taskHistory` (50), `persistentLogs` (200), `movieTaskProgress`, `refreshTaskProgress`, `movieSettings`, `magnetSettings`, `uiSettings`
+- `chrome.storage.local`: `taskHistory` (50), `persistentLogs` (200), `movieTaskProgress`, `refreshTaskProgress`, `movieSettings`, `magnetSettings`, `refreshSettings`, `uiSettings`
 
 ## Permissions
 
@@ -110,4 +111,4 @@ Add the preset to `SITE_PRESETS` in `constants.js` and an `<option>` in `#sitePr
 node --test tests/
 ```
 
-Pure helpers in `url-utils.js` and `magnet-utils.js` are the preferred unit-test targets.
+Pure helpers in `url-utils.js`, `magnet-utils.js`, and `refresh-filters.js` are the preferred unit-test targets.

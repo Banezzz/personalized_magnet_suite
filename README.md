@@ -25,7 +25,8 @@ Sequentially reloads tabs in the current window.
 
 - Collapsed by default so the daily open → extract path stays short
 - One start/stop toggle and a visible interval label
-- Optional pinned-tab exclusion and progress restore
+- Compound filters (AND): exclude pinned tabs, only tabs with no extractable magnet, only tabs in a tab group
+- Settings are remembered; progress restore still works while a run is in flight
 
 ### 3. Magnet Link Extractor
 Scans the current window for magnet links.
@@ -86,6 +87,7 @@ JavDB host access is granted by default. Other sites prompt for optional host pe
 ├── magnet-utils.js
 ├── history-store.js
 ├── delay-utils.js
+├── refresh-filters.js
 ├── permissions.js
 ├── icon.png
 ├── tests/

@@ -663,7 +663,7 @@ body {
 }
 
 .collapsible.expanded .collapsible-content {
-  max-height: 500px;
+  max-height: 640px;
   opacity: 1;
   margin-top: 12px;
   padding-top: 12px;

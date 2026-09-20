@@ -82,9 +82,18 @@
         间隔（秒）
         <input type="number" id="refreshInterval" value="1" step="0.1" min="0.1">
       </label>
-      <label class="checkbox-label" for="excludePinned">
-        <input type="checkbox" id="excludePinned"> 排除固定标签
-      </label>
+      <div class="preference-row">
+        <label class="checkbox-label" for="excludePinned">
+          <input type="checkbox" id="excludePinned"> 排除固定标签
+        </label>
+        <label class="checkbox-label" for="onlyNoMagnet">
+          <input type="checkbox" id="onlyNoMagnet"> 只刷新无磁力页面
+        </label>
+        <label class="checkbox-label" for="onlyInGroup">
+          <input type="checkbox" id="onlyInGroup"> 只刷新标签组内
+        </label>
+      </div>
+      <p class="hint">勾选的条件同时生效。</p>
       <button type="button" id="toggleRefreshing">开始刷新</button>
       <div id="refreshProgress" class="progress-text is-empty"></div>
       <div class="progress-bar-wrap is-hidden" id="refreshProgressBar">

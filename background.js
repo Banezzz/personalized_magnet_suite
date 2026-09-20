@@ -12,11 +12,14 @@ import {
 } from './constants.js';
 import { delay, randomBetween, sleep } from './delay-utils.js';
 import { createHistoryEntry, TASK_STATUS, updateHistoryEntry } from './history-store.js';
+import { collectMagnetsFromPage, flattenMagnetCandidates } from './magnet-utils.js';
+import { describeRefreshFilters, selectRefreshTargets } from './refresh-filters.js';
 import {
   describeExtractionFailure,
   describeMoviePreview,
   filterDuplicateLinks,
   isHttpUrl,
+  isRestrictedTabUrl,
   normalizeUrl,
   resolveRelativeUrl
 } from './url-utils.js';
@@ -705,6 +708,60 @@ async function handleMovieLinksTask(request, { resumed = false } = {}) {
   }
 }
 
+function executeMagnetScan(tabId) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func: collectMagnetsFromPage
+    }, (results) => {
+      if (chrome.runtime.lastError) {
+        resolve({ error: chrome.runtime.lastError.message, items: [] });
+        return;
+      }
+      resolve({ error: null, items: results?.[0]?.result || [] });
+    });
+  });
+}
+
+async function scanMagnetPresence(tabs) {
+  const presence = {};
+  await Promise.all((tabs || []).map(async (tab) => {
+    if (!tab?.id || isRestrictedTabUrl(tab.url)) return;
+    const result = await executeMagnetScan(tab.id);
+    if (result.error) {
+      presence[tab.id] = false;
+      return;
+    }
+    presence[tab.id] = flattenMagnetCandidates(result.items, { firstOnly: false }).length > 0;
+  }));
+  return presence;
+}
+
+function readRefreshFilterOptions(request = {}) {
+  return {
+    excludePinned: !!request.excludePinned,
+    onlyInGroup: !!request.onlyInGroup,
+    onlyNoMagnet: !!request.onlyNoMagnet
+  };
+}
+
+async function finishRefreshWithNoMatches(filterLabel) {
+  isRefreshing = false;
+  refreshTimeoutId = null;
+  await clearRefreshProgress();
+  stopKeepAliveIfIdle();
+  await updateHistoryEntry(refreshHistoryId, {
+    status: TASK_STATUS.COMPLETED,
+    result: `没有符合条件的标签页${filterLabel}`
+  });
+  refreshHistoryId = null;
+  safeSendMessage({
+    action: ACTIONS.refreshComplete,
+    total: 0,
+    message: '没有符合条件的标签页'
+  });
+}
+
 async function startRefreshing(request) {
   if (isRefreshing && refreshTimeoutId) {
     clearTimeout(refreshTimeoutId);
@@ -712,30 +769,60 @@ async function startRefreshing(request) {
   isRefreshing = true;
   startKeepAlive();
 
+  const options = readRefreshFilterOptions(request);
+  const filterLabel = describeRefreshFilters(options);
+
   refreshHistoryId = request.historyId || null;
   if (!refreshHistoryId) {
     const created = await createHistoryEntry({
       action: '标签页刷新',
-      result: `正在刷新，间隔 ${request.interval / 1000} 秒`
+      result: `正在刷新，间隔 ${request.interval / 1000} 秒${filterLabel}`
     });
     refreshHistoryId = created.id;
   }
 
-  const queryOptions = { currentWindow: true };
-  if (request.excludePinned) {
-    queryOptions.pinned = false;
-  }
-
-  const tabs = await queryTabs(queryOptions);
-  let index = 0;
-  const total = tabs.length;
-
-  await persistRefreshProgress({
+  const progressBase = {
     running: true,
     type: 'refresh',
     historyId: refreshHistoryId,
     interval: request.interval,
-    excludePinned: !!request.excludePinned,
+    ...options
+  };
+
+  if (options.onlyNoMagnet) {
+    const screeningMessage = '正在筛选无磁力页面...';
+    await persistRefreshProgress({
+      ...progressBase,
+      current: 0,
+      total: 0,
+      message: screeningMessage
+    });
+    safeSendMessage({
+      action: ACTIONS.refreshProgress,
+      current: 0,
+      total: 0,
+      message: screeningMessage
+    });
+  }
+
+  const allTabs = await queryTabs({ currentWindow: true });
+  const magnetPresenceById = options.onlyNoMagnet
+    ? await scanMagnetPresence(allTabs)
+    : {};
+  const tabs = selectRefreshTargets(allTabs, options, magnetPresenceById);
+
+  if (!isRefreshing) return;
+
+  if (tabs.length === 0) {
+    await finishRefreshWithNoMatches(filterLabel);
+    return;
+  }
+
+  let index = 0;
+  const total = tabs.length;
+
+  await persistRefreshProgress({
+    ...progressBase,
     current: 0,
     total,
     message: '刷新已开始'
@@ -748,9 +835,7 @@ async function startRefreshing(request) {
         if (!isRefreshing) return;
         safeSendMessage({ action: ACTIONS.refreshProgress, current: index + 1, total });
         await persistRefreshProgress({
-          running: true,
-          type: 'refresh',
-          historyId: refreshHistoryId,
+          ...progressBase,
           current: index + 1,
           total,
           message: `刷新进度: ${index + 1} / ${total}`
@@ -767,7 +852,7 @@ async function startRefreshing(request) {
     stopKeepAliveIfIdle();
     await updateHistoryEntry(refreshHistoryId, {
       status: TASK_STATUS.COMPLETED,
-      result: `刷新了 ${total} 个标签页`
+      result: `刷新了 ${total} 个标签页${filterLabel}`
     });
     refreshHistoryId = null;
     safeSendMessage({ action: ACTIONS.refreshComplete, total });

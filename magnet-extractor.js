@@ -1,6 +1,6 @@
 import { STORAGE_KEYS } from './constants.js';
 import { showToast, addLog, saveHistory, createHistory, updateHistory, TASK_STATUS } from './utils.js';
-import { deduplicateAndValidate, flattenMagnetCandidates, magnetHref } from './magnet-utils.js';
+import { collectMagnetsFromPage, deduplicateAndValidate, flattenMagnetCandidates, magnetHref } from './magnet-utils.js';
 import { ensureOriginsForTabs } from './permissions.js';
 import { isRestrictedTabUrl } from './url-utils.js';
 
@@ -126,25 +126,6 @@ function exportToFile(content, extension, mime) {
     action: '磁力链接导出',
     result: `导出 ${filename}`
   });
-}
-
-function collectMagnetsFromPage() {
-  const items = [];
-  const push = (href, sizeText) => {
-    if (!href || typeof href !== 'string') return;
-    const trimmed = href.trim();
-    if (!trimmed.toLowerCase().startsWith('magnet:')) return;
-    items.push({ href: trimmed, sizeText: sizeText || '' });
-  };
-
-  document.querySelectorAll('a[href^="magnet:"]').forEach((anchor) => {
-    const row = anchor.closest('tr, li, .item, .magnet-name, .column');
-    push(anchor.href, row ? row.innerText : anchor.textContent);
-  });
-  document.querySelectorAll('[data-clipboard-text]').forEach((el) => {
-    push(el.getAttribute('data-clipboard-text'), (el.closest('tr, li, .item') || el).innerText);
-  });
-  return items;
 }
 
 function executeOnTab(tabId) {

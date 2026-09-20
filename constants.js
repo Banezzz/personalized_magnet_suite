@@ -50,6 +50,7 @@ export const STORAGE_KEYS = {
   isDarkTheme: 'isDarkTheme',
   movieSettings: 'movieSettings',
   magnetSettings: 'magnetSettings',
+  refreshSettings: 'refreshSettings',
   uiSettings: 'uiSettings'
 };
 

@@ -191,3 +191,26 @@ export function deduplicateAndValidate(links) {
 
   return { validLinks, invalidCount, duplicateCount };
 }
+
+/**
+ * Injectable page function: no imports, no closures.
+ * Collects magnet hrefs from anchors and clipboard-text attributes.
+ */
+export function collectMagnetsFromPage() {
+  const items = [];
+  const push = (href, sizeText) => {
+    if (!href || typeof href !== 'string') return;
+    const trimmed = href.trim();
+    if (!trimmed.toLowerCase().startsWith('magnet:')) return;
+    items.push({ href: trimmed, sizeText: sizeText || '' });
+  };
+
+  document.querySelectorAll('a[href^="magnet:"]').forEach((anchor) => {
+    const row = anchor.closest('tr, li, .item, .magnet-name, .column');
+    push(anchor.href, row ? row.innerText : anchor.textContent);
+  });
+  document.querySelectorAll('[data-clipboard-text]').forEach((el) => {
+    push(el.getAttribute('data-clipboard-text'), (el.closest('tr, li, .item') || el).innerText);
+  });
+  return items;
+}
