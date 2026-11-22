@@ -61,8 +61,9 @@ describe('hasChineseSubtitleLabel', () => {
     assert.equal(hasChineseSubtitleLabel('中英文件'), true);
   });
 
-  it('does not treat U or 无码破解 as subtitles', () => {
+  it('does not treat U, LTX, or 无码破解 as subtitles', () => {
     assert.equal(hasChineseSubtitleLabel('PRED-123-U 2.1GB'), false);
+    assert.equal(hasChineseSubtitleLabel('SSIS-001-LTX'), false);
     assert.equal(hasChineseSubtitleLabel('无码破解 4.2GB'), false);
     assert.equal(hasChineseSubtitleLabel('Uncensored leak'), false);
   });
@@ -79,13 +80,18 @@ describe('hasChineseSubtitleLabel', () => {
 });
 
 describe('hasUncensoredLabel', () => {
-  it('matches U, UC, 无码, and uncensored', () => {
+  it('matches U, UC, LTX, 无码, and uncensored', () => {
     assert.equal(hasUncensoredLabel('PRED-123-U 2.1GB'), true);
     assert.equal(hasUncensoredLabel('SSIS-001-UC'), true);
+    assert.equal(hasUncensoredLabel('SSIS-001-LTX'), true);
+    assert.equal(hasUncensoredLabel('ssis-001-ltx 1080p'), true);
+    assert.equal(hasUncensoredLabel('SSIS-001-LTX-C'), true);
+    assert.equal(hasChineseSubtitleLabel('SSIS-001-LTX-C'), true);
     assert.equal(hasUncensoredLabel('无码破解 4.2GB'), true);
     assert.equal(hasUncensoredLabel('Uncensored leak'), true);
     assert.equal(hasUncensoredLabel('中文字幕 700MB'), false);
     assert.equal(hasUncensoredLabel('UHD extras'), false);
+    assert.equal(hasUncensoredLabel('VOLTX 1080p'), false);
   });
 });
 
