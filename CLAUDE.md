@@ -80,7 +80,8 @@ Single source: `SITE_PRESETS` in `constants.js`.
 
 - Format: `/^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i`
 - Dedup by lowercase btih
-- Independent priorities: **优先字幕** and **优先无码** can be combined. Score 0–2 per magnet (subtitle +1, uncensored +1). First-only picks the highest score, then page order; if nothing matches, take the first magnet on the page. Extract-all sorts by score and keeps every link. The result list shows tags and whether a first-link fallback was used.
+- Independent priorities: **优先字幕** and **优先无码** can be combined. Score 0–2 per magnet (subtitle +1, uncensored +1). First-only picks the highest score, then an LTX tie-break, then page order; if nothing matches, take the first magnet on the page. Extract-all uses the same order and keeps every link. The result list shows tags and whether a first-link fallback was used.
+- Uncensored markers: `无码`, `无码破解`, `uncensored`, and standalone tags `U`, `UC`, `restored`. `LTX` is also uncensored and outranks those markers. Short tags must sit outside letters and digits, so a `c` inside the info hash is not a subtitle, and `unrestored` is not `restored`.
 - Also reads `data-clipboard-text`
 
 ## Storage
