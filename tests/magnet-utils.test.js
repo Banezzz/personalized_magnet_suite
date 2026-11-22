@@ -80,13 +80,17 @@ describe('hasChineseSubtitleLabel', () => {
 });
 
 describe('hasUncensoredLabel', () => {
-  it('matches U, UC, LTX, 无码, and uncensored', () => {
+  it('matches U, UC, LTX, restored, 无码, and uncensored', () => {
     assert.equal(hasUncensoredLabel('PRED-123-U 2.1GB'), true);
     assert.equal(hasUncensoredLabel('SSIS-001-UC'), true);
     assert.equal(hasUncensoredLabel('SSIS-001-LTX'), true);
     assert.equal(hasUncensoredLabel('ssis-001-ltx 1080p'), true);
     assert.equal(hasUncensoredLabel('SSIS-001-LTX-C'), true);
     assert.equal(hasChineseSubtitleLabel('SSIS-001-LTX-C'), true);
+    assert.equal(hasUncensoredLabel('SNOS-380_restored_wm.mp4'), true);
+    assert.equal(hasUncensoredLabel('SNOS-380_RESTORED_WM.mp4'), true);
+    assert.equal(hasChineseSubtitleLabel('SNOS-380_restored_wm.mp4'), false);
+    assert.equal(hasUncensoredLabel('unrestored copy'), false);
     assert.equal(hasUncensoredLabel('无码破解 4.2GB'), true);
     assert.equal(hasUncensoredLabel('Uncensored leak'), true);
     assert.equal(hasUncensoredLabel('中文字幕 700MB'), false);
@@ -172,6 +176,7 @@ describe('describeMagnetTags', () => {
     assert.deepEqual(describeMagnetTags({ href: MAGNET_C, sizeText: 'C 700MB' }), ['字幕']);
     assert.deepEqual(describeMagnetTags({ href: MAGNET_U, sizeText: 'U 无码' }), ['无码']);
     assert.deepEqual(describeMagnetTags({ href: MAGNET_UC, sizeText: 'UC 1GB' }), ['字幕', '无码']);
+    assert.deepEqual(describeMagnetTags({ href: MAGNET_A, sizeText: 'SNOS-380_restored_wm.mp4' }), ['无码']);
     assert.deepEqual(describeMagnetTags({ href: MAGNET_A, sizeText: '普通' }), []);
   });
 });

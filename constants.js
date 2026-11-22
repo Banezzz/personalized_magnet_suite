@@ -87,5 +87,5 @@ export const SUBTITLE_MAGNET_TAGS = ['UC', 'C'];
 /** Phrases that mean the magnet is uncensored. */
 export const UNCENSORED_MAGNET_PHRASES = ['无码破解', '无码', 'uncensored'];
 
-/** Tags that mean uncensored: U = uncensored, UC = uncensored + Chinese, LTX = leaked. */
-export const UNCENSORED_MAGNET_TAGS = ['UC', 'U', 'LTX'];
+/** Tags that mean uncensored: U = uncensored, UC = uncensored + Chinese, LTX = leaked, restored = restored encode. */
+export const UNCENSORED_MAGNET_TAGS = ['UC', 'U', 'LTX', 'restored'];
