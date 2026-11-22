@@ -35,7 +35,7 @@ Scans the current window for magnet links.
 - **优先无码** matches `无码`, `uncensored`, `U`, `UC`, `restored`, and `LTX`. `LTX` ranks above the other uncensored markers
 - Results stay hidden until a run finishes and show 字幕 / 无码 tags plus a fallback note when the first magnet was used
 - First-only picks the highest score, then an LTX tie-break, then page order; if nothing matches, it still takes the first magnet on the page. Extract-all uses the same order and keeps every link.
-- Reads `a[href^="magnet:"]` and `data-clipboard-text`
+- Reads `a[href^="magnet:"]`, `data-clipboard-text`, and magnet links pasted in the JavDB reviews. Reviews are read with the logged-in page session, up to 5 pages. Official magnet rows stay ahead of review links when the score is the same
 - Dedup by btih hash and format validation
 - Per-tab stats: has magnets / empty / failed
 - Copy, export TXT, export JSON
