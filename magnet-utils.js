@@ -62,7 +62,8 @@ export function candidateLabelText(item) {
 }
 
 function hasStandaloneTag(text, tag) {
-  const pattern = new RegExp(`(?<![A-Za-z])${tag}(?![A-Za-z])`, 'i');
+  // Digit boundaries matter: a hex info hash often contains a lone "c".
+  const pattern = new RegExp(`(?<![A-Za-z0-9])${tag}(?![A-Za-z0-9])`, 'i');
   return pattern.test(text);
 }
 

@@ -67,10 +67,14 @@ describe('hasChineseSubtitleLabel', () => {
     assert.equal(hasChineseSubtitleLabel('Uncensored leak'), false);
   });
 
-  it('does not match C or U inside longer words', () => {
+  it('does not match C or U inside longer words or info hashes', () => {
     assert.equal(hasChineseSubtitleLabel('BLUE-RAY 1080p'), false);
     assert.equal(hasChineseSubtitleLabel('UHD extras'), false);
     assert.equal(hasChineseSubtitleLabel('DISC 2'), false);
+    assert.equal(
+      hasChineseSubtitleLabel('magnet:?xt=urn:btih:5b0de8b27acf3273b89b0e363c1cd5b6225c531e&dn=MIDA-861'),
+      false
+    );
   });
 });
 
