@@ -20,11 +20,15 @@ const HASH_B = 'b'.repeat(40);
 const HASH_C = 'c'.repeat(40);
 const HASH_D = 'd'.repeat(40);
 const HASH_E = 'e'.repeat(40);
+const HASH_F = 'f'.repeat(40);
+const HASH_G = '1'.repeat(40);
 const MAGNET_A = `magnet:?xt=urn:btih:${HASH_A}`;
 const MAGNET_B = `magnet:?xt=urn:btih:${HASH_B}&dn=title`;
 const MAGNET_UC = `magnet:?xt=urn:btih:${HASH_C}&dn=SSIS-001-UC`;
 const MAGNET_C = `magnet:?xt=urn:btih:${HASH_D}&dn=SSIS-001-C`;
 const MAGNET_U = `magnet:?xt=urn:btih:${HASH_E}&dn=SSIS-001-U`;
+const MAGNET_RESTORED = `magnet:?xt=urn:btih:${HASH_F}&dn=SNOS-380_restored_wm.mp4`;
+const MAGNET_LTX = `magnet:?xt=urn:btih:${HASH_G}&dn=MIDA-861-LTX`;
 
 describe('isValidMagnetLink', () => {
   it('accepts standard btih magnets', () => {
@@ -159,6 +163,46 @@ describe('selectPreferredMagnet', () => {
     assert.equal(
       selectPreferredMagnet(mixed, { preferSubtitles: true, preferUncensored: true }),
       MAGNET_UC
+    );
+  });
+
+  it('ranks LTX above restored and other uncensored magnets', () => {
+    const candidates = [
+      { href: MAGNET_RESTORED, sizeText: 'SNOS-380_restored_wm.mp4' },
+      { href: MAGNET_U, sizeText: 'SNOS-380-U' },
+      { href: MAGNET_A, sizeText: 'SNOS-380' },
+      { href: MAGNET_LTX, sizeText: 'MIDA-861-LTX' }
+    ];
+    assert.equal(
+      selectPreferredMagnet(candidates, { preferSubtitles: false, preferUncensored: true }),
+      MAGNET_LTX
+    );
+    const all = flattenMagnetCandidates(candidates, {
+      firstOnly: false,
+      preferSubtitles: false,
+      preferUncensored: true
+    });
+    assert.deepEqual(all.map(magnetHref), [MAGNET_LTX, MAGNET_RESTORED, MAGNET_U, MAGNET_A]);
+    assert.deepEqual(all[1].tags, ['无码']);
+  });
+
+  it('keeps subtitle plus uncensored ahead of LTX alone when both preferences are on', () => {
+    assert.equal(
+      selectPreferredMagnet([
+        { href: MAGNET_LTX, sizeText: 'MIDA-861-LTX' },
+        { href: MAGNET_UC, sizeText: 'UC 中文字幕' }
+      ], { preferSubtitles: true, preferUncensored: true }),
+      MAGNET_UC
+    );
+  });
+
+  it('lets LTX outrank a subtitle-only magnet when both preferences are on', () => {
+    assert.equal(
+      selectPreferredMagnet([
+        { href: MAGNET_C, sizeText: 'SNOS-380-C' },
+        { href: MAGNET_LTX, sizeText: 'MIDA-861-LTX' }
+      ], { preferSubtitles: true, preferUncensored: true }),
+      MAGNET_LTX
     );
   });
 

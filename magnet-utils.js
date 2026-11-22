@@ -3,6 +3,7 @@
  */
 
 import {
+  LTX_MAGNET_TAGS,
   SUBTITLE_MAGNET_PHRASES,
   SUBTITLE_MAGNET_TAGS,
   UNCENSORED_MAGNET_PHRASES,
@@ -86,24 +87,53 @@ export function hasChineseSubtitleLabel(text) {
 }
 
 export function hasUncensoredLabel(text) {
-  const source = String(text || '');
-  if (!source) return false;
-  const lower = source.toLowerCase();
-  for (const phrase of UNCENSORED_MAGNET_PHRASES) {
-    if (lower.includes(phrase.toLowerCase())) return true;
-  }
-  for (const tag of UNCENSORED_MAGNET_TAGS) {
-    if (hasStandaloneTag(source, tag)) return true;
-  }
-  return false;
+  return uncensoredTier(text) > 0;
 }
 
-export function magnetPriorityScore(item, { preferSubtitles = false, preferUncensored = false } = {}) {
+/**
+ * 0 = not uncensored, 1 = restored / 无码 / uncensored / U / UC, 2 = LTX.
+ * LTX stays in its own tier so it sorts ahead of the other uncensored markers.
+ */
+export function uncensoredTier(text) {
+  const source = String(text || '');
+  if (!source) return 0;
+  for (const tag of LTX_MAGNET_TAGS) {
+    if (hasStandaloneTag(source, tag)) return 2;
+  }
+  const lower = source.toLowerCase();
+  for (const phrase of UNCENSORED_MAGNET_PHRASES) {
+    if (lower.includes(phrase.toLowerCase())) return 1;
+  }
+  for (const tag of UNCENSORED_MAGNET_TAGS) {
+    if (hasStandaloneTag(source, tag)) return 1;
+  }
+  return 0;
+}
+
+function preferenceParts(item, { preferSubtitles = false, preferUncensored = false } = {}) {
   const label = candidateLabelText(item);
-  let score = 0;
-  if (preferSubtitles && hasChineseSubtitleLabel(label)) score += 1;
-  if (preferUncensored && hasUncensoredLabel(label)) score += 1;
-  return score;
+  const subtitle = preferSubtitles && hasChineseSubtitleLabel(label) ? 1 : 0;
+  const tier = preferUncensored ? uncensoredTier(label) : 0;
+  return {
+    score: subtitle + (tier > 0 ? 1 : 0),
+    ltx: tier === 2 ? 1 : 0
+  };
+}
+
+export function magnetPriorityScore(item, options = {}) {
+  return preferenceParts(item, options).score;
+}
+
+/**
+ * Higher score first. LTX breaks ties with other uncensored magnets and with
+ * subtitle-only magnets. Equal keys stay in page order via a stable sort.
+ * Returns negative when left should come first.
+ */
+function compareMagnetPreference(left, right, options) {
+  const a = preferenceParts(left, options);
+  const b = preferenceParts(right, options);
+  if (a.score !== b.score) return b.score - a.score;
+  return b.ltx - a.ltx;
 }
 
 export function magnetHref(value) {
@@ -135,13 +165,8 @@ export function selectPreferredMagnetItem(candidates, options = {}) {
   if (valid.length === 0) return null;
 
   let best = valid[0];
-  let bestScore = magnetPriorityScore(best, options);
   for (let i = 1; i < valid.length; i++) {
-    const score = magnetPriorityScore(valid[i], options);
-    if (score > bestScore) {
-      best = valid[i];
-      bestScore = score;
-    }
+    if (compareMagnetPreference(valid[i], best, options) < 0) best = valid[i];
   }
   return best;
 }
@@ -161,7 +186,7 @@ export function flattenMagnetCandidates(candidates, { firstOnly = false, ...opti
     return preferred ? [toMagnetResult(preferred, resultOptions)] : [];
   }
   return [...valid]
-    .sort((left, right) => magnetPriorityScore(right, options) - magnetPriorityScore(left, options))
+    .sort((left, right) => compareMagnetPreference(left, right, options))
     .map((item) => toMagnetResult(item, resultOptions));
 }
 
