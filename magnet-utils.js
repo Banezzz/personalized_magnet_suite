@@ -218,11 +218,76 @@ export function deduplicateAndValidate(links) {
   return { validLinks, invalidCount, duplicateCount };
 }
 
+const MAGNET_IN_TEXT_RE = /magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}(?:&[^<\s"'`]*)?/gi;
+
+function decodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function tidyMagnetHref(value) {
+  return decodeHtmlEntities(value)
+    .replace(/&amp;/g, '&')
+    .replace(/[)\].,;。，、）]+$/g, '');
+}
+
+/**
+ * Magnets pasted into review HTML or text. The nearby text is kept so LTX
+ * and subtitle words in the same comment still score.
+ */
+export function extractMagnetMentions(text) {
+  const source = String(text || '');
+  const found = [];
+  MAGNET_IN_TEXT_RE.lastIndex = 0;
+  let match = MAGNET_IN_TEXT_RE.exec(source);
+  while (match) {
+    const href = tidyMagnetHref(match[0]);
+    if (isValidMagnetLink(href)) {
+      const start = Math.max(0, match.index - 120);
+      const end = Math.min(source.length, match.index + match[0].length + 120);
+      const sizeText = decodeHtmlEntities(source.slice(start, end))
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      found.push({ href, sizeText });
+    }
+    match = MAGNET_IN_TEXT_RE.exec(source);
+  }
+  return found;
+}
+
+export function nextReviewPageUrl(html, baseUrl) {
+  const source = String(html || '');
+  const patterns = [
+    /<a[^>]*class="[^"]*pagination-next[^"]*"[^>]*href="([^"]+)"/i,
+    /<a[^>]*href="([^"]+)"[^>]*class="[^"]*pagination-next[^"]*"/i,
+    /<a[^>]*rel="next"[^>]*href="([^"]+)"/i,
+    /<a[^>]*href="([^"]+)"[^>]*>\s*下一[頁页]/i
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+    try {
+      const url = new URL(decodeHtmlEntities(match[1]), baseUrl);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /**
  * Injectable page function: no imports, no closures.
- * Collects magnet hrefs from anchors and clipboard-text attributes.
+ * Collects magnet hrefs from anchors, clipboard text, and, when asked,
+ * JavDB review pages for the logged-in session.
  */
-export function collectMagnetsFromPage() {
+export async function collectMagnetsFromPage(includeReviews = false) {
   const items = [];
   const push = (href, sizeText) => {
     if (!href || typeof href !== 'string') return;
@@ -238,5 +303,75 @@ export function collectMagnetsFromPage() {
   document.querySelectorAll('[data-clipboard-text]').forEach((el) => {
     push(el.getAttribute('data-clipboard-text'), (el.closest('tr, li, .item') || el).innerText);
   });
+  if (!includeReviews) return items;
+
+  const mentionPattern = /magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}(?:&[^<\s"'`]*)?/gi;
+  const decode = (value) => String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+  const addMentions = (text) => {
+    const source = String(text || '');
+    mentionPattern.lastIndex = 0;
+    let match = mentionPattern.exec(source);
+    while (match) {
+      const href = decode(match[0]).replace(/[)\].,;。，、）]+$/g, '');
+      const start = Math.max(0, match.index - 120);
+      const end = Math.min(source.length, match.index + match[0].length + 120);
+      const sizeText = decode(source.slice(start, end)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      push(href, sizeText);
+      match = mentionPattern.exec(source);
+    }
+  };
+  const nextPage = (html, baseUrl) => {
+    const patterns = [
+      /<a[^>]*class="[^"]*pagination-next[^"]*"[^>]*href="([^"]+)"/i,
+      /<a[^>]*href="([^"]+)"[^>]*class="[^"]*pagination-next[^"]*"/i,
+      /<a[^>]*rel="next"[^>]*href="([^"]+)"/i,
+      /<a[^>]*href="([^"]+)"[^>]*>\s*下一[頁页]/i
+    ];
+    for (const pattern of patterns) {
+      const match = String(html || '').match(pattern);
+      if (!match) continue;
+      try {
+        const url = new URL(decode(match[1]), baseUrl);
+        if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  const reviews = document.querySelector('#reviews');
+  if (reviews) addMentions(reviews.textContent || '');
+
+  const reviewLink = document.querySelector('a.review-tab[data-url]');
+  const reviewUrl = reviewLink ? reviewLink.getAttribute('data-url') : '';
+  if (!reviewUrl) return items;
+
+  try {
+    let next = new URL(reviewUrl, location.origin).href;
+    const seen = new Set();
+    for (let page = 0; page < 5 && next && !seen.has(next); page += 1) {
+      seen.add(next);
+      const response = await fetch(next, {
+        credentials: 'include',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'text/html'
+        }
+      });
+      if (!response.ok) break;
+      const html = await response.text();
+      if (!html || html.includes('openAuthModal')) break;
+      addMentions(html);
+      next = nextPage(html, location.origin);
+    }
+  } catch {
+    // Review magnets are optional. Links already on the page still return.
+  }
   return items;
 }

@@ -132,7 +132,8 @@ function executeOnTab(tabId) {
   return new Promise((resolve) => {
     chrome.scripting.executeScript({
       target: { tabId },
-      func: collectMagnetsFromPage
+      func: collectMagnetsFromPage,
+      args: [true]
     }, (results) => {
       if (chrome.runtime.lastError) {
         resolve({ error: chrome.runtime.lastError.message, items: [] });
