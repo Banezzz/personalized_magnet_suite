@@ -32,8 +32,9 @@ Sequentially reloads tabs in the current window.
 Scans the current window for magnet links.
 
 - Choose **优先字幕** / **优先无码** first, then **每页一条** or **全部**, then extract
+- **优先无码** matches `无码`, `uncensored`, `U`, `UC`, `restored`, and `LTX`. `LTX` ranks above the other uncensored markers
 - Results stay hidden until a run finishes and show 字幕 / 无码 tags plus a fallback note when the first magnet was used
-- First-only picks the highest score, then page order; if nothing matches, it still takes the first magnet on the page. Extract-all keeps every link and only sorts by score.
+- First-only picks the highest score, then an LTX tie-break, then page order; if nothing matches, it still takes the first magnet on the page. Extract-all uses the same order and keeps every link.
 - Reads `a[href^="magnet:"]` and `data-clipboard-text`
 - Dedup by btih hash and format validation
 - Per-tab stats: has magnets / empty / failed
