@@ -5,12 +5,14 @@ import {
   deduplicateAndValidate,
   extractBtih,
   describeMagnetTags,
+  extractMagnetMentions,
   flattenMagnetCandidates,
   hasChineseSubtitleLabel,
   hasUncensoredLabel,
   isValidMagnetLink,
   magnetHref,
   magnetPriorityScore,
+  nextReviewPageUrl,
   parseSizeToBytes,
   selectPreferredMagnet
 } from '../magnet-utils.js';
@@ -263,6 +265,43 @@ describe('flattenMagnetCandidates', () => {
     assert.deepEqual(result.map(magnetHref), [MAGNET_UC, MAGNET_C, MAGNET_U, MAGNET_A]);
     assert.deepEqual(result[0].tags, ['字幕', '无码']);
     assert.equal(result[0].usedFallback, false);
+  });
+});
+
+describe('extractMagnetMentions', () => {
+  it('reads a magnet pasted in review html and keeps nearby LTX text', () => {
+    const html = `评论 LTX破解 <div>magnet:?xt=urn:btih:${HASH_G}&amp;dn=PRWF-017-LTX</div>`;
+    const found = extractMagnetMentions(html);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].href, `magnet:?xt=urn:btih:${HASH_G}&dn=PRWF-017-LTX`);
+    assert.equal(hasUncensoredLabel(`${found[0].sizeText}\n${found[0].href}`), true);
+  });
+
+  it('ignores short or broken magnet text', () => {
+    assert.deepEqual(extractMagnetMentions('magnet:?xt=urn:btih:short 普通链接'), []);
+  });
+
+  it('lets a review LTX magnet outrank an earlier plain magnet', () => {
+    const review = extractMagnetMentions(`LTX magnet:?xt=urn:btih:${HASH_G}&dn=PRWF-017-LTX`);
+    const preferred = selectPreferredMagnet([
+      { href: MAGNET_A, sizeText: 'PRWF-017' },
+      ...review
+    ], { preferSubtitles: false, preferUncensored: true });
+    assert.equal(preferred, review[0].href);
+  });
+});
+
+describe('nextReviewPageUrl', () => {
+  it('resolves the next reviews page', () => {
+    const html = '<a class="pagination-next" href="/v/WwWEVQ/reviews/lastest?page=2">下一頁</a>';
+    assert.equal(
+      nextReviewPageUrl(html, 'https://javdb.com/v/WwWEVQ/reviews/lastest'),
+      'https://javdb.com/v/WwWEVQ/reviews/lastest?page=2'
+    );
+  });
+
+  it('returns null when there is no next page', () => {
+    assert.equal(nextReviewPageUrl('<div>没有了</div>', 'https://javdb.com/'), null);
   });
 });
 
