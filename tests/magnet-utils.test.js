@@ -9,6 +9,8 @@ import {
   flattenMagnetCandidates,
   hasChineseSubtitleLabel,
   hasUncensoredLabel,
+  isSelectableLink,
+  isValidEd2kLink,
   isValidMagnetLink,
   magnetHref,
   magnetPriorityScore,
@@ -42,6 +44,18 @@ describe('isValidMagnetLink', () => {
     assert.equal(isValidMagnetLink(''), false);
     assert.equal(isValidMagnetLink('https://example.com'), false);
     assert.equal(isValidMagnetLink('magnet:?xt=urn:btih:short'), false);
+    assert.equal(isValidMagnetLink('ed2k://|file|a.mp4|1|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|/'), false);
+  });
+});
+
+describe('isValidEd2kLink', () => {
+  it('accepts a file link and rejects a broken one', () => {
+    assert.equal(
+      isValidEd2kLink('ed2k://|file|www.98T.la@PRWF-017_restored.mp4|10386185950|fda5ff6df60eadadc551a96922d64fc4|/'),
+      true
+    );
+    assert.equal(isValidEd2kLink('ed2k://|file|short|/'), false);
+    assert.equal(isSelectableLink(MAGNET_A), true);
   });
 });
 
@@ -289,6 +303,35 @@ describe('extractMagnetMentions', () => {
     ], { preferSubtitles: false, preferUncensored: true });
     assert.equal(preferred, review[0].href);
   });
+
+  it('reads an ed2k link in a review and keeps the nearby LTX words', () => {
+    const ed2k = 'ed2k://|file|www.98T.la@PRWF-017_restored.mp4|10386185950|fda5ff6df60eadadc551a96922d64fc4|/';
+    const html = `<div class="content"><p>高金自购最新LTX模型敬请取用<br>${ed2k}</p></div>`;
+    const found = extractMagnetMentions(html);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].href, ed2k);
+    assert.equal(isValidEd2kLink(found[0].href), true);
+    assert.equal(hasUncensoredLabel(`${found[0].sizeText}\n${found[0].href}`), true);
+  });
+
+  it('prefers the review LTX ed2k over the panel UC magnet when only uncensored is on', () => {
+    const ed2k = 'ed2k://|file|www.98T.la@PRWF-017_restored.mp4|10386185950|fda5ff6df60eadadc551a96922d64fc4|/';
+    const html = [
+      `最新LTX模型 ${ed2k}`,
+      `magnet:?xt=urn:btih:${HASH_C} ltx`
+    ].join('\n');
+    const review = extractMagnetMentions(html);
+    assert.equal(review.length, 2);
+    const uncensoredOnly = { preferSubtitles: false, preferUncensored: true };
+    assert.equal(selectPreferredMagnet([
+      { href: MAGNET_UC, sizeText: 'PRWF-017-UC.torrent' },
+      ...review
+    ], uncensoredOnly), ed2k);
+    assert.equal(selectPreferredMagnet([
+      { href: MAGNET_UC, sizeText: 'PRWF-017-UC.torrent' },
+      ...review
+    ], { preferSubtitles: true, preferUncensored: true }), MAGNET_UC);
+  });
 });
 
 describe('nextReviewPageUrl', () => {
@@ -316,5 +359,13 @@ describe('deduplicateAndValidate', () => {
     assert.deepEqual(validLinks, [MAGNET_A, MAGNET_B]);
     assert.equal(duplicateCount, 1);
     assert.equal(invalidCount, 1);
+  });
+
+  it('dedups ed2k links by hash and keeps them beside magnets', () => {
+    const ed2k = 'ed2k://|file|www.98T.la@PRWF-017_restored.mp4|10386185950|fda5ff6df60eadadc551a96922d64fc4|/';
+    const copy = 'ed2k://|file|copy.mp4|1|FDA5FF6DF60EADADC551A96922D64FC4|/';
+    const { validLinks, duplicateCount } = deduplicateAndValidate([ed2k, copy, MAGNET_A]);
+    assert.deepEqual(validLinks, [ed2k, MAGNET_A]);
+    assert.equal(duplicateCount, 1);
   });
 });
