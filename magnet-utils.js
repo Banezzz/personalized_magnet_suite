@@ -11,7 +11,9 @@ import {
 } from './constants.js';
 
 export const MAGNET_PREFIX_RE = /^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}/i;
+export const ED2K_PREFIX_RE = /^ed2k:\/\/\|file\|[^|]+\|\d+\|[a-fA-F0-9]{32}\|\/$/i;
 export const BTIH_RE = /btih:([a-zA-Z0-9]{32,40})/i;
+const ED2K_HASH_RE = /ed2k:\/\/\|file\|[^|]*\|\d+\|([a-fA-F0-9]{32})\|\//i;
 export const SIZE_RE = /(\d+(?:\.\d+)?)\s*(tib|tb|gib|gb|mib|mb|kib|kb|b)\b/i;
 
 const SIZE_MULTIPLIERS = {
@@ -31,9 +33,27 @@ export function isValidMagnetLink(link) {
   return MAGNET_PREFIX_RE.test(link.trim());
 }
 
+export function isValidEd2kLink(link) {
+  if (!link || typeof link !== 'string') return false;
+  return ED2K_PREFIX_RE.test(link.trim());
+}
+
+/** Magnet or ed2k. Review comments on JavDB use both. */
+export function isSelectableLink(link) {
+  return isValidMagnetLink(link) || isValidEd2kLink(link);
+}
+
 export function extractBtih(link) {
   const match = String(link || '').match(BTIH_RE);
   return match ? match[1].toLowerCase() : null;
+}
+
+/** Dedup key. Magnets stay keyed by btih; ed2k uses its own hash. */
+export function extractLinkId(link) {
+  const btih = extractBtih(link);
+  if (btih) return btih;
+  const ed2k = String(link || '').match(ED2K_HASH_RE);
+  return ed2k ? `ed2k:${ed2k[1].toLowerCase()}` : null;
 }
 
 export function parseSizeToBytes(text) {
@@ -161,7 +181,7 @@ export function toMagnetResult(item, { firstOnly = false, ...options } = {}) {
 }
 
 export function selectPreferredMagnetItem(candidates, options = {}) {
-  const valid = (candidates || []).filter((item) => item && isValidMagnetLink(item.href));
+  const valid = (candidates || []).filter((item) => item && isSelectableLink(item.href));
   if (valid.length === 0) return null;
 
   let best = valid[0];
@@ -178,7 +198,7 @@ export function selectPreferredMagnet(candidates, options = {}) {
 
 export function flattenMagnetCandidates(candidates, { firstOnly = false, ...options } = {}) {
   if (!candidates || candidates.length === 0) return [];
-  const valid = candidates.filter((item) => item && isValidMagnetLink(item.href));
+  const valid = candidates.filter((item) => item && isSelectableLink(item.href));
   if (valid.length === 0) return [];
   const resultOptions = { firstOnly, ...options };
   if (firstOnly) {
@@ -198,11 +218,11 @@ export function deduplicateAndValidate(links) {
 
   for (const link of links) {
     const href = magnetHref(link);
-    if (!isValidMagnetLink(href)) {
+    if (!isSelectableLink(href)) {
       invalidCount += 1;
       continue;
     }
-    const hash = extractBtih(href);
+    const hash = extractLinkId(href);
     if (!hash) {
       invalidCount += 1;
       continue;
@@ -218,7 +238,7 @@ export function deduplicateAndValidate(links) {
   return { validLinks, invalidCount, duplicateCount };
 }
 
-const MAGNET_IN_TEXT_RE = /magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}(?:&[^<\s"'`]*)?/gi;
+const REVIEW_LINK_RE = /magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}(?:&[^<\s"'`]*)?|ed2k:\/\/\|file\|[^|]+\|\d+\|[a-fA-F0-9]{32}\|\//gi;
 
 function decodeHtmlEntities(value) {
   return String(value || '')
@@ -236,17 +256,17 @@ function tidyMagnetHref(value) {
 }
 
 /**
- * Magnets pasted into review HTML or text. The nearby text is kept so LTX
- * and subtitle words in the same comment still score.
+ * Magnet and ed2k links pasted into review HTML or text. The nearby text is
+ * kept so LTX and subtitle words in the same comment still score.
  */
 export function extractMagnetMentions(text) {
   const source = String(text || '');
   const found = [];
-  MAGNET_IN_TEXT_RE.lastIndex = 0;
-  let match = MAGNET_IN_TEXT_RE.exec(source);
+  REVIEW_LINK_RE.lastIndex = 0;
+  let match = REVIEW_LINK_RE.exec(source);
   while (match) {
     const href = tidyMagnetHref(match[0]);
-    if (isValidMagnetLink(href)) {
+    if (isSelectableLink(href)) {
       const start = Math.max(0, match.index - 120);
       const end = Math.min(source.length, match.index + match[0].length + 120);
       const sizeText = decodeHtmlEntities(source.slice(start, end))
@@ -255,7 +275,7 @@ export function extractMagnetMentions(text) {
         .trim();
       found.push({ href, sizeText });
     }
-    match = MAGNET_IN_TEXT_RE.exec(source);
+    match = REVIEW_LINK_RE.exec(source);
   }
   return found;
 }
@@ -284,8 +304,9 @@ export function nextReviewPageUrl(html, baseUrl) {
 
 /**
  * Injectable page function: no imports, no closures.
- * Collects magnet hrefs from anchors, clipboard text, and, when asked,
- * JavDB review pages for the logged-in session.
+ * Collects magnet hrefs from anchors and clipboard text. When asked, also
+ * reads magnet and ed2k links from the JavDB reviews tab for the logged-in
+ * session. Reviews are injected into #reviews and are absent from view-source.
  */
 export async function collectMagnetsFromPage(includeReviews = false) {
   const items = [];
@@ -305,7 +326,7 @@ export async function collectMagnetsFromPage(includeReviews = false) {
   });
   if (!includeReviews) return items;
 
-  const mentionPattern = /magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}(?:&[^<\s"'`]*)?/gi;
+  const mentionPattern = /magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}(?:&[^<\s"'`]*)?|ed2k:\/\/\|file\|[^|]+\|\d+\|[a-fA-F0-9]{32}\|\//gi;
   const decode = (value) => String(value || '')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -318,10 +339,13 @@ export async function collectMagnetsFromPage(includeReviews = false) {
     let match = mentionPattern.exec(source);
     while (match) {
       const href = decode(match[0]).replace(/[)\].,;。，、）]+$/g, '');
-      const start = Math.max(0, match.index - 120);
-      const end = Math.min(source.length, match.index + match[0].length + 120);
-      const sizeText = decode(source.slice(start, end)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      push(href, sizeText);
+      const lower = href.toLowerCase();
+      if (lower.startsWith('magnet:') || lower.startsWith('ed2k://|file|')) {
+        const start = Math.max(0, match.index - 120);
+        const end = Math.min(source.length, match.index + match[0].length + 120);
+        const sizeText = decode(source.slice(start, end)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        items.push({ href, sizeText });
+      }
       match = mentionPattern.exec(source);
     }
   };
@@ -346,7 +370,7 @@ export async function collectMagnetsFromPage(includeReviews = false) {
   };
 
   const reviews = document.querySelector('#reviews');
-  if (reviews) addMentions(reviews.textContent || '');
+  if (reviews) addMentions(reviews.innerHTML || '');
 
   const reviewLink = document.querySelector('a.review-tab[data-url]');
   const reviewUrl = reviewLink ? reviewLink.getAttribute('data-url') : '';
