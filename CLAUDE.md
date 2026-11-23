@@ -83,7 +83,7 @@ Single source: `SITE_PRESETS` in `constants.js`.
 - Independent priorities: **优先字幕** and **优先无码** can be combined. Score 0–2 per magnet (subtitle +1, uncensored +1). First-only picks the highest score, then an LTX tie-break, then page order; if nothing matches, take the first magnet on the page. Extract-all uses the same order and keeps every link. The result list shows tags and whether a first-link fallback was used.
 - Uncensored markers: `无码`, `无码破解`, `uncensored`, and standalone tags `U`, `UC`, `restored`. `LTX` is also uncensored and outranks those markers. Short tags must sit outside letters and digits, so a `c` inside the info hash is not a subtitle, and `unrestored` is not `restored`.
 - Also reads `data-clipboard-text`
-- Extraction also fetches the JavDB reviews tab (`a.review-tab[data-url]`, up to 5 pages) with the page session and scores magnets pasted in comments. The refresh filter does not fetch reviews. Review links sort after magnet-panel links when scores tie. A logged-out reviews response is ignored.
+- Extraction also reads the JavDB reviews tab. Reviews are absent from view-source; they are injected into `#reviews` and fetched from `a.review-tab[data-url]` (up to 5 pages) with the page session. Magnet and ed2k links pasted in comments are scored, including LTX or restored words beside the link. The refresh filter does not fetch reviews. Review links sort after magnet-panel links when scores tie. A logged-out reviews response is ignored.
 
 ## Storage
 
